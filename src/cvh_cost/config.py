@@ -50,6 +50,16 @@ def _parse_event(event_data: Dict[str, Any], years: int) -> EventConfig:
             f"Event '{event_data['name']}' has expected_year < 1: {expected_year}"
         )
     
+    timing_model = str(event_data.get("timing_model", "jitter")).lower()
+    if timing_model not in ("jitter", "hazard"):
+        raise ConfigValidationError(f"Invalid timing_model for event '{event_data['name']}': {timing_model}")
+    
+    cost_distribution = str(event_data.get("cost_distribution", "lognormal")).lower()
+    if cost_distribution not in ("normal", "lognormal"):
+        raise ConfigValidationError(
+            f"Invalid cost_distribution for event '{event_data['name']}': {cost_distribution}"
+        )
+    
     return EventConfig(
         name=str(event_data["name"]),
         base_cost=float(event_data["base_cost"]),
@@ -58,6 +68,11 @@ def _parse_event(event_data: Dict[str, Any], years: int) -> EventConfig:
         min_year=int(event_data.get("min_year", 1)),
         max_year=int(event_data["max_year"]) if event_data.get("max_year") is not None else None,
         cost_vol=float(event_data.get("cost_vol", 0.0)),
+        timing_model=timing_model,  # type: ignore
+        hazard_base=float(event_data.get("hazard_base", 0.0)),
+        hazard_growth=float(event_data.get("hazard_growth", 0.0)),
+        hazard_start_year=int(event_data.get("hazard_start_year", 1)),
+        cost_distribution=cost_distribution,  # type: ignore
     )
 
 
@@ -108,6 +123,9 @@ def _parse_condo(condo_data: Dict[str, Any], years: int) -> CondoParams:
         fee_escalation_rate=float(condo_data.get("fee_escalation_rate", 0.0)),
         events=events,
         other_recurring_costs=other_costs,
+        reserve_contribution_rate=float(condo_data.get("reserve_contribution_rate", 0.0)),
+        reserve_initial_balance=float(condo_data.get("reserve_initial_balance", 0.0)),
+        reserve_growth_rate=float(condo_data.get("reserve_growth_rate", 0.0)),
     )
 
 
@@ -128,12 +146,21 @@ def _parse_house(house_data: Dict[str, Any], years: int) -> HouseParams:
         for c in house_data.get("other_recurring_costs", [])
     ]
     
+    maintenance_curve_raw = house_data.get("maintenance_curve", [])
+    maintenance_curve = []
+    for point in maintenance_curve_raw:
+        if "year" not in point or "rate" not in point:
+            raise ConfigValidationError("maintenance_curve entries must have 'year' and 'rate'")
+        maintenance_curve.append((int(point["year"]), float(point["rate"])))
+    maintenance_curve.sort(key=lambda x: x[0])
+    
     return HouseParams(
         initial_value=float(house_data["initial_value"]),
         value_growth_rate=float(house_data.get("value_growth_rate", 0.0)),
         annual_maintenance_rate=float(house_data.get("annual_maintenance_rate", 0.0)),
         events=events,
         other_recurring_costs=other_costs,
+        maintenance_curve=maintenance_curve,
     )
 
 
@@ -145,6 +172,7 @@ def _parse_simulation(sim_data: Optional[Dict[str, Any]], years: int, discount_r
     """
     if sim_data is None:
         sim_data = {}
+    shock_model = str(sim_data.get("shock_model", "lognormal")).lower()
     
     return SimulationParams(
         years=years,
@@ -153,6 +181,12 @@ def _parse_simulation(sim_data: Optional[Dict[str, Any]], years: int, discount_r
         random_seed=int(sim_data.get("random_seed", 42)),
         house_maintenance_vol=float(sim_data.get("house_maintenance_vol", 0.0)),
         condo_fee_vol=float(sim_data.get("condo_fee_vol", 0.0)),
+        other_cost_vol=float(sim_data.get("other_cost_vol", 0.0)),
+        corr_inflation_house=float(sim_data.get("corr_inflation_house", 0.0)),
+        corr_inflation_condo=float(sim_data.get("corr_inflation_condo", 0.0)),
+        corr_inflation_other=float(sim_data.get("corr_inflation_other", 0.0)),
+        corr_inflation_event_cost=float(sim_data.get("corr_inflation_event_cost", 0.0)),
+        shock_model=shock_model,  # type: ignore
     )
 
 
@@ -170,6 +204,7 @@ def _parse_economic(econ_data: Optional[Dict[str, Any]]) -> EconomicParams:
     return EconomicParams(
         mode=mode,  # type: ignore
         inflation_rate=float(econ_data.get("inflation_rate", 0.0)),
+        inflation_vol=float(econ_data.get("inflation_vol", 0.0)),
     )
 
 
@@ -195,8 +230,29 @@ def validate_config(
     if sim.num_sims < 1:
         warnings.append(f"num_sims must be >= 1, got {sim.num_sims}")
     
+    if sim.other_cost_vol < 0:
+        warnings.append(f"other_cost_vol should be >= 0, got {sim.other_cost_vol}")
+
+    for name, rho in [
+        ("corr_inflation_house", sim.corr_inflation_house),
+        ("corr_inflation_condo", sim.corr_inflation_condo),
+        ("corr_inflation_other", sim.corr_inflation_other),
+        ("corr_inflation_event_cost", sim.corr_inflation_event_cost),
+    ]:
+        if rho < -1 or rho > 1:
+            warnings.append(f"{name} should be between -1 and 1, got {rho}")
+    
+    if sim.shock_model not in ("lognormal", "normal"):
+        warnings.append(f"shock_model must be 'lognormal' or 'normal', got {sim.shock_model}")
+    
     if condo.monthly_fee < 0:
         warnings.append(f"condo.monthly_fee should be >= 0, got {condo.monthly_fee}")
+    if condo.reserve_contribution_rate < 0:
+        warnings.append(f"condo.reserve_contribution_rate should be >= 0, got {condo.reserve_contribution_rate}")
+    if condo.reserve_initial_balance < 0:
+        warnings.append(f"condo.reserve_initial_balance should be >= 0, got {condo.reserve_initial_balance}")
+    if condo.reserve_growth_rate < -1:
+        warnings.append(f"condo.reserve_growth_rate should be > -1, got {condo.reserve_growth_rate}")
     
     if house.initial_value < 0:
         warnings.append(f"house.initial_value should be >= 0, got {house.initial_value}")
@@ -205,6 +261,11 @@ def validate_config(
         warnings.append(
             f"house.annual_maintenance_rate should be in [0, 1], got {house.annual_maintenance_rate}"
         )
+    for year, rate in house.maintenance_curve:
+        if year < 1:
+            warnings.append(f"maintenance_curve year must be >=1, got {year}")
+        if rate < 0 or rate > 1:
+            warnings.append(f"maintenance_curve rate should be in [0,1], got {rate}")
     
     # Validate events
     for event in condo.events + house.events:
@@ -214,6 +275,19 @@ def validate_config(
             )
         if event.base_cost < 0:
             warnings.append(f"Event '{event.name}' has negative base_cost: {event.base_cost}")
+        if event.hazard_base < 0 or event.hazard_base > 1:
+            warnings.append(f"Event '{event.name}' hazard_base should be in [0,1], got {event.hazard_base}")
+        if event.hazard_growth < 0:
+            warnings.append(f"Event '{event.name}' hazard_growth should be >=0, got {event.hazard_growth}")
+        if event.hazard_start_year < 1:
+            warnings.append(f"Event '{event.name}' hazard_start_year must be >=1, got {event.hazard_start_year}")
+        if event.cost_distribution not in ("normal", "lognormal"):
+            warnings.append(
+                f"Event '{event.name}' cost_distribution must be 'normal' or 'lognormal', got {event.cost_distribution}"
+            )
+    
+    if econ.inflation_vol < 0:
+        warnings.append(f"inflation_vol should be >= 0, got {econ.inflation_vol}")
     
     return warnings
 

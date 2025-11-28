@@ -11,12 +11,16 @@ discount_rate: <float>     # Required: Annual discount rate (e.g., 0.03 for 3%)
 economic:                  # Optional: Economic assumptions
   mode: <string>           # "real" or "nominal" (default: "real")
   inflation_rate: <float>  # Expected inflation (default: 0.0)
+  inflation_vol: <float>   # Volatility of annual inflation shock (default: 0.0)
 
 condo:                     # Required: Condo parameters
   monthly_fee: <float>     # Required: Monthly HOA/condo fee
   fee_escalation_rate: <float>  # Optional: Annual fee growth (default: 0.0)
   events: <list>           # Optional: One-time events
   other_recurring_costs: <list>  # Optional: Other annual costs
+  reserve_contribution_rate: <float>  # Optional: Fraction of annual fees saved (default: 0.0)
+  reserve_initial_balance: <float>    # Optional: Starting reserve balance (default: 0.0)
+  reserve_growth_rate: <float>        # Optional: Growth on reserves (default: 0.0)
 
 house:                     # Required: House parameters
   initial_value: <float>   # Required: House value at year 0
@@ -24,12 +28,19 @@ house:                     # Required: House parameters
   annual_maintenance_rate: <float>  # Optional: Maintenance as % of value (default: 0.0)
   events: <list>           # Optional: One-time events
   other_recurring_costs: <list>  # Optional: Other annual costs
+  maintenance_curve: <list>  # Optional: (year, rate) pairs for age/condition curve
 
 simulation:                # Optional: Monte Carlo settings
   num_sims: <integer>      # Number of simulations (default: 10000)
   random_seed: <integer>   # RNG seed (default: 42)
   house_maintenance_vol: <float>  # Maintenance volatility (default: 0.0)
   condo_fee_vol: <float>   # Fee volatility (default: 0.0)
+  other_cost_vol: <float>  # Volatility for other_recurring_costs (default: 0.0)
+  corr_inflation_house: <float>       # Corr(inflation, house maintenance shock)
+  corr_inflation_condo: <float>       # Corr(inflation, condo fee shock)
+  corr_inflation_other: <float>       # Corr(inflation, other cost shock)
+  corr_inflation_event_cost: <float>  # Corr(inflation, event cost shock)
+  shock_model: <string>  # "lognormal" (default) or "normal" shock multiplier
 ```
 
 ## Event Configuration
@@ -43,6 +54,11 @@ events:
     min_year: <integer>         # Optional: Earliest possible year (default: 1)
     max_year: <integer>         # Optional: Latest possible year (default: years)
     cost_vol: <float>           # Optional: Cost volatility (default: 0.0)
+    timing_model: <string>      # "jitter" (default) or "hazard"
+    hazard_base: <float>        # Base hazard (probability) from hazard_start_year
+    hazard_growth: <float>      # Increment added to hazard each year after hazard_start_year
+    hazard_start_year: <integer>  # Year when hazard begins (default: 1)
+    cost_distribution: <string> # "lognormal" (default) or "normal"
 ```
 
 ## Recurring Other Cost Configuration
@@ -179,18 +195,34 @@ Volatility represents the standard deviation of a normal shock applied multiplic
 |-------|---------|
 | `economic.mode` | "real" |
 | `economic.inflation_rate` | 0.0 |
+| `economic.inflation_vol` | 0.0 |
 | `condo.fee_escalation_rate` | 0.0 |
+| `condo.reserve_contribution_rate` | 0.0 |
+| `condo.reserve_initial_balance` | 0.0 |
+| `condo.reserve_growth_rate` | 0.0 |
 | `house.value_growth_rate` | 0.0 |
 | `house.annual_maintenance_rate` | 0.0 |
+| `house.maintenance_curve` | [] |
 | `event.timing_std_years` | 0.0 |
 | `event.min_year` | 1 |
 | `event.max_year` | years |
 | `event.cost_vol` | 0.0 |
+| `event.timing_model` | "jitter" |
+| `event.hazard_base` | 0.0 |
+| `event.hazard_growth` | 0.0 |
+| `event.hazard_start_year` | 1 |
+| `event.cost_distribution` | "lognormal" |
 | `other.escalation_rate` | 0.0 |
 | `simulation.num_sims` | 10000 |
 | `simulation.random_seed` | 42 |
 | `simulation.house_maintenance_vol` | 0.0 |
 | `simulation.condo_fee_vol` | 0.0 |
+| `simulation.other_cost_vol` | 0.0 |
+| `simulation.corr_inflation_house` | 0.0 |
+| `simulation.corr_inflation_condo` | 0.0 |
+| `simulation.corr_inflation_other` | 0.0 |
+| `simulation.corr_inflation_event_cost` | 0.0 |
+| `simulation.shock_model` | "lognormal" |
 
 ## Validation Rules
 

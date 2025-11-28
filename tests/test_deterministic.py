@@ -75,6 +75,27 @@ class TestCondoDeterministic:
         
         expected_other_pv = pv_annuity(1000, 0.05, 10)
         assert abs(result.condo_pv_other - expected_other_pv) < 0.01
+    
+    def test_condo_reserves_offset_events(self):
+        """Reserve contributions should reduce net event costs."""
+        event = EventConfig(name="assessment", base_cost=10_000, expected_year=5)
+        condo_no_reserve = CondoParams(monthly_fee=1000, events=[event])
+        condo_with_reserve = CondoParams(
+            monthly_fee=1000,
+            events=[event],
+            reserve_contribution_rate=0.5,  # Save half the fee each year
+            reserve_growth_rate=0.0,
+            reserve_initial_balance=0.0,
+        )
+        house = HouseParams(initial_value=0)
+        sim = SimulationParams(years=6, discount_rate=0.0)
+        econ = EconomicParams()
+        
+        no_reserve_result = compute_deterministic(condo_no_reserve, house, sim, econ)
+        reserve_result = compute_deterministic(condo_with_reserve, house, sim, econ)
+        
+        # With a 0% discount rate, reserve contributions (5 years * $6k) cover the $10k assessment.
+        assert reserve_result.condo_pv_events < no_reserve_result.condo_pv_events
 
 
 class TestHouseDeterministic:
@@ -133,6 +154,24 @@ class TestHouseDeterministic:
         
         expected = pv_single(12000, 0.03, 15) + pv_single(7000, 0.03, 10)
         assert abs(result.house_pv_events - expected) < 0.01
+    
+    def test_house_maintenance_curve(self):
+        """Maintenance should follow an age/condition curve."""
+        condo = CondoParams(monthly_fee=0)
+        house = HouseParams(
+            initial_value=100_000,
+            value_growth_rate=0.0,
+            annual_maintenance_rate=0.01,
+            maintenance_curve=[(1, 0.01), (10, 0.02)],
+        )
+        sim = SimulationParams(years=10, discount_rate=0.0)
+        econ = EconomicParams()
+        
+        result = compute_deterministic(condo, house, sim, econ)
+        
+        # Curve rises from 1% to 2%, so PV should exceed flat 1% maintenance.
+        flat_maint = pv_annuity(0.01 * 100_000, 0.0, 10)
+        assert result.house_pv_base > flat_maint
 
 
 class TestDiffCalculation:

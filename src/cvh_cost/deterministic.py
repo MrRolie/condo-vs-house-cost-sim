@@ -18,6 +18,50 @@ from .models import (
 from .pv import pv_single, pv_annuity, pv_growth_annuity, pv_recurring_with_escalation
 
 
+def _effective_growth_rate(base_rate: float, econ: EconomicParams) -> float:
+    """
+    Combine user growth/escalation with inflation when operating in nominal mode.
+    """
+    if econ.mode == "nominal":
+        return (1 + base_rate) * (1 + econ.inflation_rate) - 1
+    return base_rate
+
+
+def _maintenance_rate_for_year(house: HouseParams, year: int) -> float:
+    """
+    Return maintenance rate for a given year using an optional age/condition curve.
+    """
+    if not house.maintenance_curve:
+        return house.annual_maintenance_rate
+    
+    # Find surrounding points for interpolation
+    points = house.maintenance_curve
+    if year <= points[0][0]:
+        return points[0][1]
+    if year >= points[-1][0]:
+        return points[-1][1]
+    
+    for (y0, r0), (y1, r1) in zip(points[:-1], points[1:]):
+        if y0 <= year <= y1:
+            span = y1 - y0
+            weight = (year - y0) / span
+            return r0 + weight * (r1 - r0)
+    
+    return house.annual_maintenance_rate
+
+
+def _event_year_deterministic(event: EventConfig, years: int) -> int:
+    """
+    Deterministic placement of events. For hazard-based events, fall back to expected_year.
+    """
+    year = event.expected_year
+    if event.min_year:
+        year = max(event.min_year, year)
+    if event.max_year is not None:
+        year = min(event.max_year, year)
+    return max(1, min(year, years))
+
+
 def _compute_condo_base_pv(
     condo: CondoParams,
     sim: SimulationParams,
@@ -117,7 +161,7 @@ def compute_deterministic(
     condo: CondoParams,
     house: HouseParams,
     sim: SimulationParams,
-    econ: EconomicParams,  # Reserved for future use
+    econ: EconomicParams,
 ) -> DeterministicResult:
     """
     Compute deterministic present values for condo and house ownership costs.
@@ -139,23 +183,76 @@ def compute_deterministic(
         This function has no side effects and does not print anything.
         Use reporting.format_text_report() to generate human-readable output.
     """
-    # Condo PV components
-    condo_pv_base = _compute_condo_base_pv(condo, sim)
-    condo_pv_events = _compute_events_pv(condo.events, sim.discount_rate, sim.years)
-    condo_pv_other = _compute_other_recurring_pv(
-        condo.other_recurring_costs, sim.discount_rate, sim.years
-    )
+    discount_rate = sim.discount_rate
+    fee_growth = _effective_growth_rate(condo.fee_escalation_rate, econ)
+    reserve_growth = _effective_growth_rate(condo.reserve_growth_rate, econ)
+    house_value_growth = _effective_growth_rate(house.value_growth_rate, econ)
+    
+    # Precompute event years deterministically
+    condo_event_years = {e.name: _event_year_deterministic(e, sim.years) for e in condo.events}
+    house_event_years = {e.name: _event_year_deterministic(e, sim.years) for e in house.events}
+    
+    # Condo simulation (deterministic)
+    condo_fee = condo.monthly_fee * 12
+    reserve_balance = condo.reserve_initial_balance
+    condo_pv_base = 0.0
+    condo_pv_events = 0.0
+    condo_pv_other = 0.0
+    
+    # House simulation (deterministic)
+    house_value = house.initial_value
+    house_pv_base = 0.0
+    house_pv_events = 0.0
+    house_pv_other = 0.0
+    
+    other_cost_growth_cache = {
+        "condo": [_effective_growth_rate(c.escalation_rate, econ) for c in condo.other_recurring_costs],
+        "house": [_effective_growth_rate(c.escalation_rate, econ) for c in house.other_recurring_costs],
+    }
+    
+    for year in range(1, sim.years + 1):
+        # Condo base fees and reserves
+        condo_fee *= (1 + fee_growth)
+        reserve_balance *= (1 + reserve_growth)
+        reserve_contribution = condo_fee * condo.reserve_contribution_rate
+        reserve_balance += reserve_contribution
+        condo_pv_base += pv_single(condo_fee, discount_rate, year)
+        
+        # Condo other recurring costs
+        for idx, rec_cost in enumerate(condo.other_recurring_costs):
+            rec_growth = other_cost_growth_cache["condo"][idx]
+            amount = rec_cost.annual_amount * (1 + rec_growth) ** year
+            condo_pv_other += pv_single(amount, discount_rate, year)
+        
+        # Condo events
+        for event in condo.events:
+            if condo_event_years[event.name] == year:
+                event_cost = event.base_cost
+                covered = min(reserve_balance, event_cost)
+                reserve_balance -= covered
+                net_cost = event_cost - covered
+                condo_pv_events += pv_single(net_cost, discount_rate, year)
+        
+        # House maintenance baseline using age curve
+        if year > 1:
+            house_value *= (1 + house_value_growth)
+        maintenance_rate = _maintenance_rate_for_year(house, year)
+        maint_amount = maintenance_rate * house_value
+        house_pv_base += pv_single(maint_amount, discount_rate, year)
+        
+        # House other recurring
+        for idx, rec_cost in enumerate(house.other_recurring_costs):
+            rec_growth = other_cost_growth_cache["house"][idx]
+            amount = rec_cost.annual_amount * (1 + rec_growth) ** year
+            house_pv_other += pv_single(amount, discount_rate, year)
+        
+        # House events
+        for event in house.events:
+            if house_event_years[event.name] == year:
+                house_pv_events += pv_single(event.base_cost, discount_rate, year)
+    
     condo_pv_total = condo_pv_base + condo_pv_events + condo_pv_other
-    
-    # House PV components
-    house_pv_base = _compute_house_base_pv(house, sim)
-    house_pv_events = _compute_events_pv(house.events, sim.discount_rate, sim.years)
-    house_pv_other = _compute_other_recurring_pv(
-        house.other_recurring_costs, sim.discount_rate, sim.years
-    )
     house_pv_total = house_pv_base + house_pv_events + house_pv_other
-    
-    # Difference (positive = house more expensive)
     diff_pv = house_pv_total - condo_pv_total
     
     return DeterministicResult(

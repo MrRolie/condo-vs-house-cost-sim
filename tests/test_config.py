@@ -304,6 +304,35 @@ class TestEventParsing:
         assert event.min_year == 1
         assert event.max_year is None
         assert event.cost_vol == 0.0
+        assert event.timing_model == "jitter"
+        assert event.cost_distribution == "lognormal"
+
+    def test_parse_maintenance_curve_and_reserves(self):
+        """Test parsing maintenance_curve and reserve fields."""
+        config = {
+            "years": 20,
+            "discount_rate": 0.03,
+            "condo": {
+                "monthly_fee": 500,
+                "reserve_contribution_rate": 0.1,
+                "reserve_initial_balance": 1000,
+                "reserve_growth_rate": 0.02,
+            },
+            "house": {
+                "initial_value": 300_000,
+                "maintenance_curve": [
+                    {"year": 1, "rate": 0.01},
+                    {"year": 10, "rate": 0.02},
+                ],
+            },
+        }
+        
+        condo, house, _, _ = load_config_dict(config)
+        
+        assert condo.reserve_contribution_rate == 0.1
+        assert condo.reserve_initial_balance == 1000
+        assert condo.reserve_growth_rate == 0.02
+        assert house.maintenance_curve == [(1, 0.01), (10, 0.02)]
     
     def test_event_missing_required_field(self):
         """Test that event missing required field raises error."""

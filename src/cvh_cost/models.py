@@ -6,7 +6,7 @@ configurations, and results throughout the simulation.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -27,6 +27,7 @@ class RecurringOtherCost:
     name: str
     annual_amount: float
     escalation_rate: float = 0.0
+    # Optional deterministic real escalation; stochastic piece lives in SimulationParams.other_cost_vol
 
 
 @dataclass
@@ -34,7 +35,8 @@ class EventConfig:
     """
     Configuration for a one-time event (e.g., roof replacement, HVAC, special assessment).
     
-    Supports both deterministic (expected_year) and stochastic timing (timing_std_years).
+    Supports both deterministic (expected_year) and stochastic timing (timing_std_years)
+    as well as hazard-based timing models.
     
     Attributes:
         name: Descriptive name for the event
@@ -44,6 +46,11 @@ class EventConfig:
         min_year: Earliest year the event can occur (default: 1)
         max_year: Latest year the event can occur (None = analysis horizon)
         cost_vol: Volatility for cost in Monte Carlo (std dev of normal shock, 0.0 = no randomness)
+        timing_model: "jitter" (default) or "hazard"
+        hazard_base: Base annual hazard (probability of occurrence) starting at hazard_start_year
+        hazard_growth: Additional hazard added per year after hazard_start_year
+        hazard_start_year: Year when hazard-based timing begins
+        cost_distribution: Distribution used for cost shocks ("lognormal" default to avoid negatives)
     """
     name: str
     base_cost: float
@@ -52,6 +59,11 @@ class EventConfig:
     min_year: int = 1
     max_year: Optional[int] = None
     cost_vol: float = 0.0
+    timing_model: Literal["jitter", "hazard"] = "jitter"
+    hazard_base: float = 0.0  # Annual hazard at hazard_start_year
+    hazard_growth: float = 0.0  # Incremental hazard per year after hazard_start_year
+    hazard_start_year: int = 1
+    cost_distribution: Literal["normal", "lognormal"] = "lognormal"
 
 
 @dataclass
@@ -64,11 +76,17 @@ class CondoParams:
         fee_escalation_rate: Annual growth rate for fees (0.0 = level fees)
         events: List of one-time events (e.g., special assessments)
         other_recurring_costs: Additional recurring costs beyond the monthly fee
+        reserve_contribution_rate: Fraction of annual fees set aside for reserves each year
+        reserve_initial_balance: Starting reserve balance
+        reserve_growth_rate: Deterministic growth on reserves
     """
     monthly_fee: float
     fee_escalation_rate: float = 0.0
     events: List[EventConfig] = field(default_factory=list)
     other_recurring_costs: List[RecurringOtherCost] = field(default_factory=list)
+    reserve_contribution_rate: float = 0.0  # Fraction of annual fees set aside each year
+    reserve_initial_balance: float = 0.0
+    reserve_growth_rate: float = 0.0  # Deterministic annual growth on reserve balance
 
 
 @dataclass
@@ -82,12 +100,14 @@ class HouseParams:
         annual_maintenance_rate: Annual maintenance as a fraction of house value
         events: List of one-time events (e.g., roof, HVAC, plumbing)
         other_recurring_costs: Additional recurring costs beyond maintenance
+        maintenance_curve: Optional (year, rate) points for age/condition curve; interpolated annually
     """
     initial_value: float
     value_growth_rate: float = 0.0
     annual_maintenance_rate: float = 0.0
     events: List[EventConfig] = field(default_factory=list)
     other_recurring_costs: List[RecurringOtherCost] = field(default_factory=list)
+    maintenance_curve: List[Tuple[int, float]] = field(default_factory=list)  # (year, rate) pairs sorted by year
 
 
 @dataclass
@@ -102,6 +122,12 @@ class SimulationParams:
         random_seed: Seed for reproducible random number generation
         house_maintenance_vol: Volatility (std dev) for house maintenance costs
         condo_fee_vol: Volatility (std dev) for condo fee costs
+        other_cost_vol: Volatility for other_recurring_costs
+        corr_inflation_house: Correlation between inflation shock and house maintenance shock
+        corr_inflation_condo: Correlation between inflation shock and condo fee shock
+        corr_inflation_other: Correlation between inflation shock and other cost shock
+        corr_inflation_event_cost: Correlation between inflation shock and event cost shock
+        shock_model: "lognormal" (default) or "normal" for multiplicative shocks
     """
     years: int
     discount_rate: float
@@ -109,6 +135,12 @@ class SimulationParams:
     random_seed: int = 42
     house_maintenance_vol: float = 0.0
     condo_fee_vol: float = 0.0
+    other_cost_vol: float = 0.0
+    corr_inflation_house: float = 0.0
+    corr_inflation_condo: float = 0.0
+    corr_inflation_other: float = 0.0
+    corr_inflation_event_cost: float = 0.0
+    shock_model: Literal["lognormal", "normal"] = "lognormal"
 
 
 @dataclass
@@ -122,9 +154,11 @@ class EconomicParams:
     Attributes:
         mode: Whether parameters are in "nominal" or "real" terms
         inflation_rate: Expected inflation rate (used if mode == "nominal")
+        inflation_vol: Volatility for annual inflation shock (used for correlation)
     """
     mode: Literal["nominal", "real"] = "real"
     inflation_rate: float = 0.0
+    inflation_vol: float = 0.0
 
 
 # ----- Result Dataclasses -----

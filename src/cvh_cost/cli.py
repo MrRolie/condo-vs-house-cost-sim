@@ -92,7 +92,7 @@ def main() -> int:
         print(" | ".join(parts))
     else:
         # Print full report
-        report = format_text_report(det_result, mc_result, sim)
+        report = format_text_report(det_result, mc_result, sim, econ)
         print(report)
     
     return 0

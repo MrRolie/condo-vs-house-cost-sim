@@ -6,6 +6,7 @@ A Python tool for comparing the long-run present value of ownership costs betwee
 
 - **Deterministic PV Analysis**: Calculate present value of ownership costs with fixed parameters
 - **Monte Carlo Simulation**: Model uncertainty in costs and timing with configurable volatility
+- **Economic Coherence**: Real/nominal handling with inflation-driven escalation and correlated shocks
 - **Flexible Configuration**: YAML-based configuration for easy scenario definition
 - **Library & CLI**: Use as a Python library or via command-line interface
 - **Jupyter Notebooks**: Interactive exploration with provided notebooks

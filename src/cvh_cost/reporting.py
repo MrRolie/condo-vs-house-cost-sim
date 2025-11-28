@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.figure
 
-from .models import DeterministicResult, MonteCarloResult, SimulationParams
+from .models import DeterministicResult, MonteCarloResult, SimulationParams, EconomicParams
 from .pv import pv_to_monthly_savings
 
 
@@ -19,6 +19,7 @@ def format_text_report(
     det: Optional[DeterministicResult],
     mc: Optional[MonteCarloResult],
     sim: SimulationParams,
+    econ: Optional[EconomicParams] = None,
 ) -> str:
     """
     Generate a formatted text report of the analysis results.
@@ -38,6 +39,8 @@ def format_text_report(
     lines.append("")
     lines.append(f"Analysis horizon: {sim.years} years")
     lines.append(f"Discount rate: {sim.discount_rate:.2%}")
+    if econ is not None:
+        lines.append(f"Economic mode: {econ.mode} | inflation: {econ.inflation_rate:.2%} | inflation vol: {getattr(econ, 'inflation_vol', 0.0):.2%}")
     lines.append("")
     lines.append("Note: All values are Present Value (PV) of ownership costs.")
     lines.append("      Higher PV = more expensive over the analysis period.")
@@ -58,24 +61,24 @@ def format_text_report(
         lines.append(f"  One-time events:  ${det.condo_pv_events:>12,.0f}")
         lines.append(f"  Other recurring:  ${det.condo_pv_other:>12,.0f}")
         lines.append(f"  TOTAL PV:         ${det.condo_pv_total:>12,.0f}")
-        lines.append(f"  → Equivalent monthly savings: ${condo_monthly:>8,.0f}/mo")
+        lines.append(f"  -> Equivalent monthly savings: ${condo_monthly:>8,.0f}/mo")
         lines.append("")
         lines.append("House Ownership Costs (PV):")
         lines.append(f"  Maintenance:      ${det.house_pv_base:>12,.0f}")
         lines.append(f"  One-time events:  ${det.house_pv_events:>12,.0f}")
         lines.append(f"  Other recurring:  ${det.house_pv_other:>12,.0f}")
         lines.append(f"  TOTAL PV:         ${det.house_pv_total:>12,.0f}")
-        lines.append(f"  → Equivalent monthly savings: ${house_monthly:>8,.0f}/mo")
+        lines.append(f"  -> Equivalent monthly savings: ${house_monthly:>8,.0f}/mo")
         lines.append("")
         lines.append(f"Cost Difference (House - Condo): ${det.diff_pv:>12,.0f}")
         if det.diff_pv > 0:
-            lines.append(f"  → House costs ${det.diff_pv:,.0f} more (PV)")
-            lines.append(f"  → You'd need ~${diff_monthly:,.0f}/mo extra savings for house")
+            lines.append(f"  -> House costs ${det.diff_pv:,.0f} more (PV)")
+            lines.append(f"  -> You'd need ~${diff_monthly:,.0f}/mo extra savings for house")
         elif det.diff_pv < 0:
-            lines.append(f"  → Condo costs ${-det.diff_pv:,.0f} more (PV)")
-            lines.append(f"  → You'd need ~${diff_monthly:,.0f}/mo extra savings for condo")
+            lines.append(f"  -> Condo costs ${-det.diff_pv:,.0f} more (PV)")
+            lines.append(f"  -> You'd need ~${diff_monthly:,.0f}/mo extra savings for condo")
         else:
-            lines.append("  → Costs are equal")
+            lines.append("  -> Costs are equal")
         lines.append("")
     
     if mc is not None:
@@ -158,7 +161,7 @@ def plot_diff_distribution(
     ax.axvline(x=mc.diff_summary.p95, color='orange', linestyle=':', linewidth=1.5,
                label=f'95th %: ${mc.diff_summary.p95:,.0f}')
     
-    ax.set_xlabel('Cost Difference (House Cost PV − Condo Cost PV) [$]')
+    ax.set_xlabel('Cost Difference (House Cost PV - Condo Cost PV) [$]')
     ax.set_ylabel('Frequency')
     ax.set_title(title)
     ax.legend(loc='upper right')

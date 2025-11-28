@@ -10,6 +10,7 @@ from cvh_cost.models import (
     SimulationParams,
     EconomicParams,
     EventConfig,
+    RecurringOtherCost,
 )
 from cvh_cost.deterministic import compute_deterministic
 from cvh_cost.monte_carlo import run_monte_carlo
@@ -291,3 +292,68 @@ class TestMonteCarloEventTiming:
         
         # All PVs should be identical
         assert result.house_summary.std < 0.01
+
+
+class TestMonteCarloAdvancedDynamics:
+    """Tests for enhanced economic and volatility dynamics."""
+    
+    def test_other_cost_volatility_increases_spread(self):
+        """Volatility on other_recurring_costs should widen the distribution."""
+        other = RecurringOtherCost(name="insurance", annual_amount=2000, escalation_rate=0.0)
+        condo = CondoParams(monthly_fee=0, other_recurring_costs=[other])
+        house = HouseParams(initial_value=0)
+        econ = EconomicParams()
+        
+        sim_low = SimulationParams(
+            years=15, discount_rate=0.03, num_sims=2000,
+            other_cost_vol=0.05,
+        )
+        sim_high = SimulationParams(
+            years=15, discount_rate=0.03, num_sims=2000,
+            other_cost_vol=0.40,
+        )
+        
+        low = run_monte_carlo(condo, house, sim_low, econ)
+        high = run_monte_carlo(condo, house, sim_high, econ)
+        
+        assert high.condo_summary.std > low.condo_summary.std
+    
+    def test_hazard_event_can_be_skipped(self):
+        """Hazard timing with zero hazard should result in no event costs."""
+        hazard_event = EventConfig(
+            name="rare_roof",
+            base_cost=20_000,
+            expected_year=5,
+            timing_model="hazard",
+            hazard_base=0.0,
+            hazard_growth=0.0,
+        )
+        condo = CondoParams(monthly_fee=0)
+        house = HouseParams(initial_value=0, events=[hazard_event])
+        sim = SimulationParams(years=10, discount_rate=0.03, num_sims=500)
+        econ = EconomicParams()
+        
+        result = run_monte_carlo(condo, house, sim, econ)
+        
+        # With zero hazard, events never fire so PV should be ~0
+        assert result.house_summary.mean < 1.0
+    
+    def test_reserves_reduce_expected_event_costs(self):
+        """Reserve funding should lower expected PV of condo events."""
+        event = EventConfig(name="assessment", base_cost=10_000, expected_year=3)
+        
+        condo_no_reserve = CondoParams(monthly_fee=1000, events=[event])
+        condo_with_reserve = CondoParams(
+            monthly_fee=1000,
+            events=[event],
+            reserve_contribution_rate=1.0,  # save entire fee
+            reserve_growth_rate=0.0,
+        )
+        house = HouseParams(initial_value=0)
+        sim = SimulationParams(years=5, discount_rate=0.03, num_sims=500, random_seed=123)
+        econ = EconomicParams()
+        
+        no_reserve = run_monte_carlo(condo_no_reserve, house, sim, econ)
+        with_reserve = run_monte_carlo(condo_with_reserve, house, sim, econ)
+        
+        assert with_reserve.condo_summary.mean < no_reserve.condo_summary.mean
