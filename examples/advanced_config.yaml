@@ -1,0 +1,89 @@
+# Advanced Configuration Example
+# A more comprehensive scenario with multiple events and recurring costs
+
+years: 30
+discount_rate: 0.035
+
+economic:
+  mode: real
+  inflation_rate: 0.025
+
+condo:
+  monthly_fee: 550
+  fee_escalation_rate: 0.03
+  events:
+    - name: "special_assessment_exterior"
+      base_cost: 8000
+      expected_year: 10
+      timing_std_years: 2
+      min_year: 5
+      max_year: 15
+      cost_vol: 0.30
+    - name: "special_assessment_amenities"
+      base_cost: 5000
+      expected_year: 18
+      timing_std_years: 2
+      cost_vol: 0.25
+  other_recurring_costs:
+    - name: "unit_insurance"
+      annual_amount: 600
+      escalation_rate: 0.02
+    - name: "parking_fee"
+      annual_amount: 1200
+      escalation_rate: 0.01
+
+house:
+  initial_value: 500000
+  value_growth_rate: 0.02
+  annual_maintenance_rate: 0.015
+  events:
+    - name: "roof_replacement"
+      base_cost: 10000
+      expected_year: 20
+      timing_std_years: 3
+      min_year: 15
+      max_year: 25
+      cost_vol: 0.25
+    - name: "hvac_replacement"
+      base_cost: 5000
+      expected_year: 15
+      timing_std_years: 2
+      min_year: 10
+      max_year: 20
+      cost_vol: 0.20
+    - name: "water_heater"
+      base_cost: 1200
+      expected_year: 12
+      timing_std_years: 2
+      cost_vol: 0.15
+    - name: "appliance_refresh"
+      base_cost: 0
+      expected_year: 10
+      timing_std_years: 1
+      cost_vol: 0.20
+    - name: "exterior_paint"
+      base_cost: 500
+      expected_year: 20
+      timing_std_years: 3
+      cost_vol: 0.15
+    - name: "driveway_repair"
+      base_cost: 3000
+      expected_year: 30
+      timing_std_years: 3
+      cost_vol: 0.30
+  other_recurring_costs:
+    - name: "home_insurance"
+      annual_amount: 1200
+      escalation_rate: 0.03
+    - name: "landscaping"
+      annual_amount: 1000
+      escalation_rate: 0.01
+    - name: "snow_removal"
+      annual_amount: 350
+      escalation_rate: 0.01
+
+simulation:
+  num_sims: 20000
+  random_seed: 12345
+  house_maintenance_vol: 0.25
+  condo_fee_vol: 0.08
