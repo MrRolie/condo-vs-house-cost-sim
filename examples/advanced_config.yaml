@@ -29,13 +29,13 @@ condo:
       annual_amount: 600
       escalation_rate: 0.02
     - name: "parking_fee"
-      annual_amount: 1200
+      annual_amount: 0
       escalation_rate: 0.01
 
 house:
   initial_value: 500000
-  value_growth_rate: 0.02
-  annual_maintenance_rate: 0.015
+  value_growth_rate: 0.03
+  annual_maintenance_rate: 0.008
   events:
     - name: "roof_replacement"
       base_cost: 10000

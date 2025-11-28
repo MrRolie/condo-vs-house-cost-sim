@@ -17,7 +17,7 @@ condo:
 house:
   initial_value: 400000
   value_growth_rate: 0.01
-  annual_maintenance_rate: 0.015
+  annual_maintenance_rate: 0.012
   events:
     - name: "roof"
       base_cost: 10000
