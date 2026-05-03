@@ -1,0 +1,10 @@
+{
+  "as_of": "2026-05-02",
+  "source": "fixture",
+  "cpi_yoy": 0.026,
+  "core_cpi_yoy": 0.029,
+  "breakeven_5y": 0.024,
+  "breakeven_10y": 0.023,
+  "mortgage_30y": 0.0635,
+  "mortgage_15y": 0.0570
+}
