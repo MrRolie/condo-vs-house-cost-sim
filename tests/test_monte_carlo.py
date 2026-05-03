@@ -4,7 +4,7 @@ Tests for Monte Carlo simulation.
 
 import pytest
 import numpy as np
-from cvh_cost.models import (
+from cvh_cost.core.models import (
     CondoParams,
     HouseParams,
     SimulationParams,
@@ -12,8 +12,8 @@ from cvh_cost.models import (
     EventConfig,
     RecurringOtherCost,
 )
-from cvh_cost.deterministic import compute_deterministic
-from cvh_cost.monte_carlo import run_monte_carlo
+from cvh_cost.core.deterministic import compute_deterministic
+from cvh_cost.core.monte_carlo import run_monte_carlo
 
 
 class TestMonteCarloBasics:

@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Tuple, Optional
 
 import yaml
 
-from .models import (
+from cvh_cost.core.models import (
     CondoParams,
     HouseParams,
     SimulationParams,

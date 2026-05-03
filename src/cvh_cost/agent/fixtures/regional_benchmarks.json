@@ -1,0 +1,12 @@
+{
+  "as_of": "2026-05-02",
+  "source": "fixture",
+  "regions": {
+    "boston":        {"house_maintenance_pct": 0.013, "house_insurance_annual": 1700, "condo_hoa_per_sqft_month": 0.65},
+    "san francisco": {"house_maintenance_pct": 0.011, "house_insurance_annual": 1400, "condo_hoa_per_sqft_month": 0.85},
+    "austin":        {"house_maintenance_pct": 0.012, "house_insurance_annual": 2100, "condo_hoa_per_sqft_month": 0.45},
+    "chicago":       {"house_maintenance_pct": 0.014, "house_insurance_annual": 1500, "condo_hoa_per_sqft_month": 0.55},
+    "seattle":       {"house_maintenance_pct": 0.012, "house_insurance_annual": 1300, "condo_hoa_per_sqft_month": 0.70},
+    "default":       {"house_maintenance_pct": 0.012, "house_insurance_annual": 1600, "condo_hoa_per_sqft_month": 0.55}
+  }
+}

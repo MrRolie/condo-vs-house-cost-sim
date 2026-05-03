@@ -9,10 +9,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config import load_config, ConfigValidationError
-from .deterministic import compute_deterministic
-from .monte_carlo import run_monte_carlo
-from .reporting import format_text_report
+from cvh_cost.config import load_config, ConfigValidationError
+from cvh_cost.core.deterministic import compute_deterministic
+from cvh_cost.core.monte_carlo import run_monte_carlo
+from cvh_cost.core.reporting import format_text_report
 
 
 def main() -> int:
