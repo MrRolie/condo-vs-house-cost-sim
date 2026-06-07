@@ -11,7 +11,7 @@
 
 | Session | Type | Status | Artifact path(s) (resume contract) | Notes |
 | --- | --- | --- | --- | --- |
-| 1 | decisive | `completed` | `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim` — commit `daf9503` | Rename + uv + AGENTS.md/CLAUDE.md + docs structure |
+| 1 | decisive | `completed` | `/home/mm-mike/ai_system/projects/housing-decision-engine` — commit `daf9503` | Rename + uv + AGENTS.md/CLAUDE.md + docs structure |
 | 2 | brainstorm-to-execute | `not_started` | (will be produced by S2) | MCP server — agent-native layer |
 | 3 | brainstorm-to-execute | `not_started` | (will be produced by S3) | Rent option + employment cash flow model |
 | 4 | brainstorm-to-execute | `not_started` | (will be produced by S4) | Market scenario layer + Monte Carlo extensions |
@@ -25,9 +25,9 @@ A `completed` row MUST carry a real, stat-able **absolute** artifact path.
 - **Session type:** brainstorm-to-execute
 - **Next engine skill to invoke:** `mm-spine:brainstorming` — MCP server design
 - **Input artifacts it consumes:**
-  - `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/src/hde/` — engine package (renamed, uv-managed)
-  - `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/docs/reference/` — architecture + API contract docs
-  - `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/examples/` — example YAML configs
+  - `/home/mm-mike/ai_system/projects/housing-decision-engine/src/hde/` — engine package (renamed, uv-managed)
+  - `/home/mm-mike/ai_system/projects/housing-decision-engine/docs/reference/` — architecture + API contract docs
+  - `/home/mm-mike/ai_system/projects/housing-decision-engine/examples/` — example YAML configs
 - **Session objective:** Design and build the MCP server (`mcp_server/`). Brainstorm: tool granularity, input/output contracts, FastMCP pattern (ref actuarial-system). Implement: wrap existing deterministic + MC engine as MCP tools. Claude should be able to call `compare_housing` and get a structured result by end of session.
 - **Mid-session resume state:** N/A (S2 not started)
 
@@ -64,7 +64,7 @@ Start Session 1 (decisive). Pre-flight checklist:
 - **Scope boundary:**
   - IN: 3-way comparison (rent / condo / house); employment cash flow with income-shock events; real estate market scenarios (price drops, rate shocks); MCP server with Claude-callable tools; CLI for standalone use; YAML scenario configs; repo aligned with projects/ conventions.
   - OUT: Geographic tax rules; mortgage optimization / leverage modeling; investment portfolio returns (opportunity cost of down payment deferred to S3 design decision); multi-user / SaaS product concerns; production deployment beyond lain-node.
-- **Spine repo:** `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/` (will be renamed to `housing-decision-engine/` in S1) · **Target repo:** same
+- **Spine repo:** `/home/mm-mike/ai_system/projects/housing-decision-engine/` (will be renamed to `housing-decision-engine/` in S1) · **Target repo:** same
 
 ## Success Criteria
 
