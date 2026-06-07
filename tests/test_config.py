@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 import yaml
 
-from cvh_cost.config import load_config, load_config_dict, ConfigValidationError
+from hde.config import load_config, load_config_dict, ConfigValidationError
 
 
 class TestLoadConfigFromFile:

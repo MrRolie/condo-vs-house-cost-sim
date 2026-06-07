@@ -3,7 +3,7 @@ Tests for PV utility functions.
 """
 
 import pytest
-from cvh_cost.pv import pv_single, pv_annuity, pv_growth_annuity, pv_series
+from hde.pv import pv_single, pv_annuity, pv_growth_annuity, pv_series
 
 
 class TestPvSingle:
@@ -164,7 +164,7 @@ class TestPvToMonthlySavings:
     
     def test_basic_conversion(self):
         """Test basic PV to monthly savings conversion."""
-        from cvh_cost.pv import pv_to_monthly_savings
+        from hde.pv import pv_to_monthly_savings
         # $100k PV over 20 years at 3%
         monthly = pv_to_monthly_savings(100_000, 0.03, 20)
         # Should be around $550/month
@@ -172,26 +172,26 @@ class TestPvToMonthlySavings:
     
     def test_zero_pv(self):
         """Test zero PV returns zero monthly."""
-        from cvh_cost.pv import pv_to_monthly_savings
+        from hde.pv import pv_to_monthly_savings
         result = pv_to_monthly_savings(0, 0.03, 20)
         assert result == 0.0
     
     def test_zero_years(self):
         """Test zero years returns zero."""
-        from cvh_cost.pv import pv_to_monthly_savings
+        from hde.pv import pv_to_monthly_savings
         result = pv_to_monthly_savings(100_000, 0.03, 0)
         assert result == 0.0
     
     def test_zero_rate(self):
         """Test zero rate case."""
-        from cvh_cost.pv import pv_to_monthly_savings
+        from hde.pv import pv_to_monthly_savings
         # $120k PV over 10 years at 0% = $1000/month
         result = pv_to_monthly_savings(120_000, 0.0, 10)
         assert abs(result - 1000) < 0.01
     
     def test_roundtrip_consistency(self):
         """Test that monthly savings accumulates back to PV."""
-        from cvh_cost.pv import pv_to_monthly_savings
+        from hde.pv import pv_to_monthly_savings
         pv = 150_000
         rate = 0.04
         years = 25

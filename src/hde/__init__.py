@@ -1,11 +1,11 @@
 """
-CVH Cost - Condo vs House Cost Analysis Engine
+Housing Decision Engine
 
-A Python tool for comparing the long-run present value of ownership costs
-between condos and houses using deterministic and Monte Carlo analysis.
+Present value comparison engine for rent / condo / house decisions,
+with employment cash flow modeling and real estate market scenario analysis.
 """
 
-from cvh_cost.models import (
+from hde.models import (
     CondoParams,
     HouseParams,
     SimulationParams,
@@ -16,10 +16,10 @@ from cvh_cost.models import (
     MonteCarloResult,
     MonteCarloSummary,
 )
-from cvh_cost.deterministic import compute_deterministic
-from cvh_cost.monte_carlo import run_monte_carlo
-from cvh_cost.config import load_config
-from cvh_cost.pv import pv_to_monthly_savings
+from hde.deterministic import compute_deterministic
+from hde.monte_carlo import run_monte_carlo
+from hde.config import load_config
+from hde.pv import pv_to_monthly_savings
 
 __version__ = "0.1.0"
 
