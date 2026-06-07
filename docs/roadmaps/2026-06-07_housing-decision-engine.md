@@ -2,7 +2,7 @@
 
 ## Status
 
-**Overall:** Not started
+**Overall:** In progress (S1 complete)
 **Created:** 2026-06-07
 **Last Updated:** 2026-06-07
 **Slug:** `housing-decision-engine`
@@ -11,7 +11,7 @@
 
 | Session | Type | Status | Artifact path(s) (resume contract) | Notes |
 | --- | --- | --- | --- | --- |
-| 1 | decisive | `not_started` | (will be produced by S1) | Rename + uv + AGENTS.md/CLAUDE.md + docs structure |
+| 1 | decisive | `completed` | `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim` — commit `daf9503` | Rename + uv + AGENTS.md/CLAUDE.md + docs structure |
 | 2 | brainstorm-to-execute | `not_started` | (will be produced by S2) | MCP server — agent-native layer |
 | 3 | brainstorm-to-execute | `not_started` | (will be produced by S3) | Rent option + employment cash flow model |
 | 4 | brainstorm-to-execute | `not_started` | (will be produced by S4) | Market scenario layer + Monte Carlo extensions |
@@ -21,21 +21,22 @@ A `completed` row MUST carry a real, stat-able **absolute** artifact path.
 
 ### Hand-off Payload
 
-- **Next session:** Session 1
-- **Session type:** decisive
-- **Next engine skill to invoke:** Execute directly (decisive — no brainstorm needed; full pre-flight checklist below)
+- **Next session:** Session 2
+- **Session type:** brainstorm-to-execute
+- **Next engine skill to invoke:** `mm-spine:brainstorming` — MCP server design
 - **Input artifacts it consumes:**
-  - `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/` — existing repo root
-  - `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/pyproject.toml` — current setuptools config
-  - `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/src/cvh_cost/` — package source
-- **Session objective:** Transform the repo skeleton into a housing-decision-engine-shaped repo: rename directory and package, migrate from setuptools to uv, add AGENTS.md + CLAUDE.md, restructure docs (move `context/` → `docs/`, archive notebooks), ensure all existing tests pass under the new setup. No new features in this session — structural only.
-- **Mid-session resume state:** N/A (not started)
+  - `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/src/hde/` — engine package (renamed, uv-managed)
+  - `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/docs/reference/` — architecture + API contract docs
+  - `/home/mm-mike/ai_system/projects/condo-vs-house-cost-sim/examples/` — example YAML configs
+- **Session objective:** Design and build the MCP server (`mcp_server/`). Brainstorm: tool granularity, input/output contracts, FastMCP pattern (ref actuarial-system). Implement: wrap existing deterministic + MC engine as MCP tools. Claude should be able to call `compare_housing` and get a structured result by end of session.
+- **Mid-session resume state:** N/A (S2 not started)
 
 ### Decisions / Deviations
 
 - **2026-06-07:** Selected 4-session structure (S1 structural, S2 MCP, S3 rent+income, S4 market scenarios). Operator confirmed.
-- **2026-06-07:** New repo/package name: `housing-decision-engine` (dir) / `hde` (Python package slug, shorter than `housing_decision_engine`). Final package slug TBD in S1 — either `hde` or `housing_decision_engine`.
+- **2026-06-07:** New repo/package name: `housing-decision-engine` (dir) / `hde` (Python package slug). Operator chose `hde` over `housing_decision_engine`.
 - **2026-06-07:** Scope expanded beyond original cost-sim to include employment cash flow modeling and real estate market scenario/sensitivity analysis — making this a personal financial scenario engine, not just a cost comparator.
+- **2026-06-07 (S1 complete):** `src/cvh_cost/` → `src/hde/`, setuptools → hatchling, entry point `cvh-cost` → `hde`, Python floor bumped 3.9→3.10. 76 tests pass; `uv.lock` committed.
 
 ### Next Recommended Action
 
