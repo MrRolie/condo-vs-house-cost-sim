@@ -435,13 +435,23 @@ class TestRankingProbs:
 
 
 class TestAffordabilityMC:
-    def test_affordability_mc_prob_in_valid_range(self):
+    def test_affordability_mc_prob_near_zero_when_below_threshold(self):
+        """Fee = 24% of income, zero vol → P(exceed 35%) should be near zero."""
         income = IncomeParams(annual_income=50_000.0, affordability_threshold=0.35)
-        condo = CondoParams(monthly_fee=1000.0)  # 12k/50k=24%, below threshold
+        condo = CondoParams(monthly_fee=1000.0)  # 12k/50k = 24%, below threshold
+        spec = _spec(condo=condo, income=income, num_sims=500)
+        result = run_monte_carlo(spec)
+        assert result.affordability_mc is not None
+        assert result.affordability_mc.prob_condo_exceeds < 0.05  # should be near 0
+
+    def test_affordability_mc_prob_near_one_when_above_threshold(self):
+        """Fee = 48% of income, zero vol → P(exceed 35%) should be near 1."""
+        income = IncomeParams(annual_income=25_000.0, affordability_threshold=0.35)
+        condo = CondoParams(monthly_fee=1000.0)  # 12k/25k = 48%, above threshold
         spec = _spec(condo=condo, income=income, num_sims=200)
         result = run_monte_carlo(spec)
         assert result.affordability_mc is not None
-        assert 0.0 <= result.affordability_mc.prob_condo_exceeds <= 1.0
+        assert result.affordability_mc.prob_condo_exceeds > 0.95  # should be near 1
 
     def test_no_income_no_affordability_mc(self):
         condo = CondoParams(monthly_fee=500.0)

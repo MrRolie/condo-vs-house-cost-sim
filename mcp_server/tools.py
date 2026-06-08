@@ -202,6 +202,12 @@ def sweep_param(scenario_name: str, param_path: str, values: list[float]) -> dic
     if section in {"condo", "house", "rent"} and getattr(entry.spec, section) is None:
         return {"error": f"scenario '{safe_name}' has no {section} section; cannot sweep {param_path}"}
 
+    # Coerce integer fields — JSON delivers all numbers as float (e.g. 10.0),
+    # but SimulationParams.years: int — range(1, sim.years + 1) crashes on float.
+    INT_FIELDS = {"years", "num_sims", "random_seed"}
+    if field in INT_FIELDS:
+        values = [int(v) for v in values]
+
     rows = []
     for v in values:
         spec_copy = copy.deepcopy(entry.spec)
