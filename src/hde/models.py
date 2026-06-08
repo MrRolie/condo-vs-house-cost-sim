@@ -6,7 +6,7 @@ configurations, and results throughout the simulation.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Literal, Tuple
+from typing import FrozenSet, List, Optional, Literal, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -141,6 +141,8 @@ class SimulationParams:
     corr_inflation_other: float = 0.0
     corr_inflation_event_cost: float = 0.0
     shock_model: Literal["lognormal", "normal"] = "lognormal"
+    rent_escalation_vol: float = 0.0
+    investment_return_vol: float = 0.0
 
 
 @dataclass
@@ -159,6 +161,48 @@ class EconomicParams:
     mode: Literal["nominal", "real"] = "real"
     inflation_rate: float = 0.0
     inflation_vol: float = 0.0
+
+
+# ----- S3 Input Types -----
+
+@dataclass
+class PayDropEvent:
+    """A one-time income shock event."""
+    year: int
+    magnitude: float        # fraction of income retained (0.8 = 20% cut)
+    year_jitter_std: float = 0.0
+    magnitude_vol: float = 0.0
+
+
+@dataclass
+class RentParams:
+    """Parameters for the rent option."""
+    monthly_rent: float
+    rent_escalation_rate: float = 0.03
+    invested_down_payment: float = 0.0
+    investment_return_rate: float = 0.07
+    events: List["EventConfig"] = field(default_factory=list)
+    other_recurring_costs: List["RecurringOtherCost"] = field(default_factory=list)
+
+
+@dataclass
+class IncomeParams:
+    """Employment cash flow parameters for affordability modeling."""
+    annual_income: float
+    income_growth_rate: float = 0.03
+    affordability_threshold: float = 0.35
+    pay_drop_events: List[PayDropEvent] = field(default_factory=list)
+
+
+@dataclass
+class ComparisonSpec:
+    """Single input bundle for all comparison engines. Replaces the 4-tuple."""
+    simulation: "SimulationParams"
+    economic: "EconomicParams"
+    condo: Optional["CondoParams"] = None
+    house: Optional["HouseParams"] = None
+    rent: Optional[RentParams] = None
+    income: Optional[IncomeParams] = None
 
 
 # ----- Result Dataclasses -----
@@ -236,3 +280,68 @@ class MonteCarloResult:
     diff_summary: MonteCarloSummary
 
     prob_house_more_expensive: float
+
+
+# ----- S3 Result Types -----
+
+# Breakdown key constants — drift protection when fields are renamed
+CONDO_BREAKDOWN_KEYS: FrozenSet[str] = frozenset({"fee_pv", "events_pv", "other_pv", "reserve_pv"})
+HOUSE_BREAKDOWN_KEYS: FrozenSet[str] = frozenset({"maintenance_pv", "events_pv", "other_pv"})
+RENT_BREAKDOWN_KEYS: FrozenSet[str] = frozenset({"rent_pv", "events_pv", "other_pv", "invested_dp_benefit_pv"})
+
+
+@dataclass
+class OptionResult:
+    """Per-option deterministic result."""
+    total_pv: float
+    breakdown: dict  # keys defined by {CONDO,HOUSE,RENT}_BREAKDOWN_KEYS
+
+
+@dataclass
+class AffordabilityReport:
+    """Deterministic affordability layer."""
+    annual_incomes: List[float]
+    threshold: float
+    rent_ratios: Optional[List[float]] = None
+    condo_ratios: Optional[List[float]] = None
+    house_ratios: Optional[List[float]] = None
+    years_rent_exceeds: List[int] = field(default_factory=list)
+    years_condo_exceeds: List[int] = field(default_factory=list)
+    years_house_exceeds: List[int] = field(default_factory=list)
+
+
+@dataclass
+class ComparisonDeterministicResult:
+    """Replaces DeterministicResult."""
+    condo: Optional[OptionResult] = None
+    house: Optional[OptionResult] = None
+    rent: Optional[OptionResult] = None
+    income_report: Optional[AffordabilityReport] = None
+
+
+@dataclass
+class MonteCarloOptionResult:
+    """Per-option MC result. pvs array never crosses MCP boundary."""
+    pvs: npt.NDArray[np.float64]
+    summary: MonteCarloSummary
+
+
+@dataclass
+class AffordabilityMCReport:
+    """MC affordability layer."""
+    threshold: float
+    prob_rent_exceeds: Optional[float] = None
+    prob_condo_exceeds: Optional[float] = None
+    prob_house_exceeds: Optional[float] = None
+
+
+@dataclass
+class ComparisonMonteCarloResult:
+    """Replaces MonteCarloResult."""
+    condo: Optional[MonteCarloOptionResult] = None
+    house: Optional[MonteCarloOptionResult] = None
+    rent: Optional[MonteCarloOptionResult] = None
+    prob_rent_cheapest: Optional[float] = None
+    prob_condo_cheapest: Optional[float] = None
+    prob_house_cheapest: Optional[float] = None
+    affordability_mc: Optional[AffordabilityMCReport] = None
