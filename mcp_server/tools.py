@@ -5,16 +5,16 @@ import dataclasses
 import time
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
 from hde.config import load_config_dict, ConfigValidationError
 from hde.deterministic import compute_deterministic
 from hde.models import DeterministicResult, MonteCarloResult
 from hde.monte_carlo import run_monte_carlo
 from hde.reporting import format_text_report, plot_diff_distribution, plot_pv_distributions
 from mcp_server import registry
-
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 FIGURE_CACHE_DIR: Path = Path.home() / ".cache" / "hde" / "figures"
 
@@ -53,22 +53,28 @@ def define_scenario(name: str, config: dict) -> dict:
     'condo' (with 'monthly_fee'), and 'house' (with 'initial_value')."""
     try:
         params = load_config_dict(config)
-    except ConfigValidationError as e:
+    except (ConfigValidationError, ValueError, TypeError) as e:
         return {"error": f"config invalid: {e}"}
+    existing = name in registry._REGISTRY
     registry.define(name, raw_config=config, params=params)
     condo, house, sim, _econ = params
-    return {
+    result = {
         "name": name,
         "status": "defined",
         "condo_monthly_fee": condo.monthly_fee,
         "house_initial_value": house.initial_value,
         "years": sim.years,
     }
+    if existing:
+        result["previous_results_cleared"] = True
+    return result
 
 
 def run_comparison(name: str, mode: str = "both") -> dict:
     """Run deterministic and/or Monte Carlo comparison for a named scenario.
     mode: 'deterministic' | 'monte_carlo' | 'both'."""
+    if mode not in ("deterministic", "monte_carlo", "both"):
+        return {"error": f"unsupported mode {mode!r}. Options: deterministic, monte_carlo, both"}
     try:
         entry = registry.get(name)
     except KeyError:
@@ -113,6 +119,8 @@ _SWEEP_PATHS: dict[str, tuple[str | None, str]] = {
 def sweep_param(name: str, param_path: str, values: list) -> dict:
     """Sweep a scalar parameter across a list of values using the deterministic engine.
     param_path uses dot-notation (e.g. 'condo.monthly_fee', 'years'). Flat scalar fields only."""
+    if not values:
+        return {"error": "values must be a non-empty list"}
     if param_path not in _SWEEP_PATHS:
         allowed = sorted(_SWEEP_PATHS.keys())
         return {"error": f"unsupported param_path: {param_path!r}. Allowed: {allowed}"}
@@ -134,7 +142,10 @@ def sweep_param(name: str, param_path: str, values: list) -> dict:
         except ConfigValidationError as e:
             return {"error": f"invalid value {value!r} for {param_path!r}: {e}"}
         condo, house, sim, econ = params
-        det = compute_deterministic(condo, house, sim, econ)
+        try:
+            det = compute_deterministic(condo, house, sim, econ)
+        except Exception as e:
+            return {"error": f"computation failed for value {value!r}: {e}"}
         rows.append({
             "value": value,
             "condo_pv_total": det.condo_pv_total,
@@ -158,9 +169,10 @@ def save_figure(name: str, figure_type: str) -> dict:
     if figure_type not in ("diff_distribution", "pv_distributions"):
         return {"error": f"unknown figure_type {figure_type!r}. Options: diff_distribution, pv_distributions"}
 
+    safe_name = Path(name).name  # strips any directory components
     FIGURE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    ts = int(time.time())
-    path = FIGURE_CACHE_DIR / f"{name}_{figure_type}_{ts}.png"
+    ts = int(time.time_ns())
+    path = FIGURE_CACHE_DIR / f"{safe_name}_{figure_type}_{ts}.png"
 
     if figure_type == "diff_distribution":
         fig = plot_diff_distribution(entry.mc_result)

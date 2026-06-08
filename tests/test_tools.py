@@ -265,3 +265,14 @@ def test_delete_scenario_missing():
     result = delete_scenario("nonexistent")
     assert "error" in result
     assert "nonexistent" in result["error"]
+
+
+# --- cross-mode re-run stale state clearing ---
+
+def test_run_comparison_deterministic_clears_stale_mc():
+    define_scenario("s1", BASIC_CONFIG)
+    run_comparison("s1", mode="both")
+    assert registry.get("s1").mc_result is not None
+    run_comparison("s1", mode="deterministic")
+    assert registry.get("s1").mc_result is None
+    assert registry.get("s1").det_result is not None

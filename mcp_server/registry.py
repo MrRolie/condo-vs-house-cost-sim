@@ -48,10 +48,8 @@ def store_results(
     mc_result: MonteCarloResult | None = None,
 ) -> None:
     entry = get(name)
-    if det_result is not None:
-        entry.det_result = det_result
-    if mc_result is not None:
-        entry.mc_result = mc_result
+    entry.det_result = det_result
+    entry.mc_result = mc_result
 
 
 def clear() -> None:

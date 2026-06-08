@@ -46,7 +46,7 @@ def run_comparison_tool(name: str, mode: str = "both") -> dict:
 
 
 @mcp.tool
-def sweep_param_tool(name: str, param_path: str, values: list) -> dict:
+def sweep_param_tool(name: str, param_path: str, values: list[float]) -> dict:
     """Sweep a scalar parameter across values using the deterministic engine.
 
     Supported param_path values (dot-notation, flat scalars only):
