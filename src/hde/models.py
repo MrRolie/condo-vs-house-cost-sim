@@ -6,7 +6,7 @@ configurations, and results throughout the simulation.
 """
 
 from dataclasses import dataclass, field
-from typing import FrozenSet, List, Optional, Literal, Tuple
+from typing import Dict, FrozenSet, List, Optional, Literal, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -181,8 +181,8 @@ class RentParams:
     rent_escalation_rate: float = 0.03
     invested_down_payment: float = 0.0
     investment_return_rate: float = 0.07
-    events: List["EventConfig"] = field(default_factory=list)
-    other_recurring_costs: List["RecurringOtherCost"] = field(default_factory=list)
+    events: List[EventConfig] = field(default_factory=list)
+    other_recurring_costs: List[RecurringOtherCost] = field(default_factory=list)
 
 
 @dataclass
@@ -197,10 +197,10 @@ class IncomeParams:
 @dataclass
 class ComparisonSpec:
     """Single input bundle for all comparison engines. Replaces the 4-tuple."""
-    simulation: "SimulationParams"
-    economic: "EconomicParams"
-    condo: Optional["CondoParams"] = None
-    house: Optional["HouseParams"] = None
+    simulation: SimulationParams
+    economic: EconomicParams
+    condo: Optional[CondoParams] = None
+    house: Optional[HouseParams] = None
     rent: Optional[RentParams] = None
     income: Optional[IncomeParams] = None
 
@@ -294,7 +294,7 @@ RENT_BREAKDOWN_KEYS: FrozenSet[str] = frozenset({"rent_pv", "events_pv", "other_
 class OptionResult:
     """Per-option deterministic result."""
     total_pv: float
-    breakdown: dict  # keys defined by {CONDO,HOUSE,RENT}_BREAKDOWN_KEYS
+    breakdown: Dict[str, float]  # keys defined by {CONDO,HOUSE,RENT}_BREAKDOWN_KEYS
 
 
 @dataclass

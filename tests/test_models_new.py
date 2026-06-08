@@ -59,6 +59,7 @@ def test_comparison_spec_with_options():
 def test_option_result_structure():
     r = OptionResult(total_pv=50_000.0, breakdown={"fee_pv": 50_000.0})
     assert r.total_pv == 50_000.0
+    assert r.breakdown == {"fee_pv": 50_000.0}
 
 
 def test_comparison_deterministic_result_defaults():
