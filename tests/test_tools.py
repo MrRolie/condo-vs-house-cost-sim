@@ -6,9 +6,11 @@ import pytest
 import numpy as np
 from hde.config import load_config_dict
 from hde.models import (
-    DeterministicResult,
-    MonteCarloResult,
+    ComparisonDeterministicResult,
+    ComparisonMonteCarloResult,
+    MonteCarloOptionResult,
     MonteCarloSummary,
+    OptionResult,
 )
 from mcp_server import registry
 import mcp_server.tools as tools_module
@@ -23,21 +25,27 @@ def clean_registry():
     registry.clear()
 
 
-def _make_det() -> DeterministicResult:
-    return DeterministicResult(
-        condo_pv_base=10.0, condo_pv_events=2.0, condo_pv_other=1.0, condo_pv_total=13.0,
-        house_pv_base=20.0, house_pv_events=3.0, house_pv_other=1.0, house_pv_total=24.0,
-        diff_pv=11.0,
+def _make_det() -> ComparisonDeterministicResult:
+    return ComparisonDeterministicResult(
+        condo=OptionResult(
+            total_pv=13.0,
+            breakdown={"fee_pv": 10.0, "events_pv": 2.0, "other_pv": 1.0, "reserve_pv": 0.0},
+        ),
+        house=OptionResult(
+            total_pv=24.0,
+            breakdown={"maintenance_pv": 20.0, "events_pv": 3.0, "other_pv": 1.0},
+        ),
     )
 
 
-def _make_mc() -> MonteCarloResult:
+def _make_mc() -> ComparisonMonteCarloResult:
     arr = np.array([1.0, 2.0, 3.0])
     s = MonteCarloSummary(mean=2.0, std=1.0, p5=1.0, p50=2.0, p95=3.0)
-    return MonteCarloResult(
-        condo_pv=arr, house_pv=arr, diff_pv=arr,
-        condo_summary=s, house_summary=s, diff_summary=s,
-        prob_house_more_expensive=0.5,
+    return ComparisonMonteCarloResult(
+        condo=MonteCarloOptionResult(pvs=arr, summary=s),
+        house=MonteCarloOptionResult(pvs=arr, summary=s),
+        prob_condo_cheapest=0.5,
+        prob_house_cheapest=0.5,
     )
 
 
@@ -54,16 +62,20 @@ BASIC_CONFIG = {
 def test_det_to_dict_is_json_safe():
     d = _det_to_dict(_make_det())
     json.dumps(d)  # must not raise
-    assert d["diff_pv"] == 11.0
-    assert d["condo_pv_total"] == 13.0
+    assert d["condo"]["total_pv"] == 13.0
+    assert d["house"]["total_pv"] == 24.0
+    assert d["rent"] is None
+    assert d["affordability"] is None
 
 
 def test_mc_to_dict_no_numpy_arrays():
     d = _mc_to_dict(_make_mc())
     json.dumps(d)  # must not raise; numpy arrays would fail here
-    assert d["prob_house_more_expensive"] == 0.5
-    for key in ("condo", "house", "diff"):
+    assert d["prob_condo_cheapest"] == 0.5
+    assert d["prob_house_cheapest"] == 0.5
+    for key in ("condo", "house"):
         assert set(d[key].keys()) == {"mean", "std", "p5", "p50", "p95"}
+    assert d["rent"] is None
     assert d["condo"]["mean"] == 2.0
 
 
@@ -102,8 +114,8 @@ def test_run_comparison_both_modes():
     assert len(result["report"]) > 0
     assert "deterministic" in result
     assert "monte_carlo" in result
-    assert isinstance(result["deterministic"]["diff_pv"], float)
-    assert 0.0 <= result["monte_carlo"]["prob_house_more_expensive"] <= 1.0
+    assert isinstance(result["deterministic"]["condo"]["total_pv"], float)
+    assert 0.0 <= result["monte_carlo"]["prob_condo_cheapest"] <= 1.0
 
 
 def test_run_comparison_deterministic_only():
@@ -142,8 +154,8 @@ def test_sweep_param_returns_rows():
     assert "rows" in result
     assert len(result["rows"]) == 3
     assert result["param_path"] == "condo.monthly_fee"
-    # Higher fee → higher condo PV → lower diff_pv (house relatively cheaper)
-    pv_totals = [r["condo_pv_total"] for r in result["rows"]]
+    # Higher fee → higher condo PV total
+    pv_totals = [r["condo_total_pv"] for r in result["rows"]]
     assert pv_totals[0] < pv_totals[1] < pv_totals[2]
 
 
@@ -180,6 +192,7 @@ def test_sweep_paths_resolve_against_live_dataclass_fields():
         "years": 20, "discount_rate": 0.03,
         "condo": {"monthly_fee": 500, "fee_escalation_rate": 0.02, "reserve_contribution_rate": 0.01},
         "house": {"initial_value": 400_000, "value_growth_rate": 0.01, "annual_maintenance_rate": 0.015},
+        "rent": {"monthly_rent": 2000, "invested_down_payment": 100_000, "investment_return_rate": 0.07},
         "simulation": {"house_maintenance_vol": 0.3, "condo_fee_vol": 0.05},
         "economic": {"inflation_rate": 0.02},
     }
@@ -276,3 +289,27 @@ def test_run_comparison_deterministic_clears_stale_mc():
     run_comparison("s1", mode="deterministic")
     assert registry.get("s1").mc_result is None
     assert registry.get("s1").det_result is not None
+
+
+# --- rent sweep drift guards ---
+
+def test_drift_guard_sweep_paths_rent():
+    """All rent _SWEEP_PATHS entries must resolve against a rent-inclusive spec."""
+    from mcp_server.tools import _SWEEP_PATHS
+    from hde.config import load_config_dict
+    config = {
+        "years": 10, "discount_rate": 0.05,
+        "rent": {"monthly_rent": 2000, "invested_down_payment": 100_000, "investment_return_rate": 0.07},
+    }
+    spec = load_config_dict(config)
+    rent_paths = {k: v for k, v in _SWEEP_PATHS.items() if k.startswith("rent.")}
+    for path, (section, field) in rent_paths.items():
+        assert hasattr(spec.rent, field), f"rent.{field} not in RentParams"
+
+
+def test_sweep_param_rent_path_no_rent_section():
+    """Sweep on rent.* path with no rent section returns error."""
+    define_scenario("s1", {"years": 10, "discount_rate": 0.05, "condo": {"monthly_fee": 500}})
+    result = sweep_param("s1", "rent.monthly_rent", [2000.0, 2500.0])
+    assert "error" in result
+    assert "no rent section" in result["error"]

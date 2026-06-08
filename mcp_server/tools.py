@@ -1,7 +1,5 @@
 # mcp_server/tools.py
 from __future__ import annotations
-import copy
-import dataclasses
 import time
 from pathlib import Path
 
@@ -11,8 +9,16 @@ import matplotlib.pyplot as plt
 
 from hde.config import load_config_dict, ConfigValidationError
 from hde.deterministic import compute_deterministic
-from hde.models import DeterministicResult, MonteCarloResult
 from hde.monte_carlo import run_monte_carlo
+from hde.models import (
+    ComparisonSpec,
+    ComparisonDeterministicResult,
+    ComparisonMonteCarloResult,
+    MonteCarloSummary,
+    CONDO_BREAKDOWN_KEYS,
+    HOUSE_BREAKDOWN_KEYS,
+    RENT_BREAKDOWN_KEYS,
+)
 from hde.reporting import format_text_report, plot_diff_distribution, plot_pv_distributions
 from mcp_server import registry
 
@@ -23,25 +29,64 @@ FIGURE_CACHE_DIR: Path = Path.home() / ".cache" / "hde" / "figures"
 # Serialization helpers (private)
 # ---------------------------------------------------------------------------
 
-def _det_to_dict(det: DeterministicResult) -> dict:
-    return dataclasses.asdict(det)
+def _det_to_dict(det: ComparisonDeterministicResult) -> dict:
+    def _opt(r):
+        if r is None:
+            return None
+        return {"total_pv": r.total_pv, "breakdown": r.breakdown}
 
-
-def _mc_to_dict(mc: MonteCarloResult) -> dict:
-    def _s(summary):
-        return {
-            "mean": summary.mean,
-            "std": summary.std,
-            "p5": summary.p5,
-            "p50": summary.p50,
-            "p95": summary.p95,
-        }
-    return {
-        "condo": _s(mc.condo_summary),
-        "house": _s(mc.house_summary),
-        "diff": _s(mc.diff_summary),
-        "prob_house_more_expensive": mc.prob_house_more_expensive,
+    result = {
+        "condo": _opt(det.condo),
+        "house": _opt(det.house),
+        "rent": _opt(det.rent),
     }
+    if det.income_report is not None:
+        rpt = det.income_report
+
+        def _opt_afford(ratios, exceeds):
+            if ratios is None:
+                return None
+            return {"ratios": ratios, "years_exceeding": exceeds}
+
+        result["affordability"] = {
+            "annual_incomes": rpt.annual_incomes,
+            "threshold": rpt.threshold,
+            "rent": _opt_afford(rpt.rent_ratios, rpt.years_rent_exceeds),
+            "condo": _opt_afford(rpt.condo_ratios, rpt.years_condo_exceeds),
+            "house": _opt_afford(rpt.house_ratios, rpt.years_house_exceeds),
+        }
+    else:
+        result["affordability"] = None
+    return result
+
+
+def _mc_to_dict(mc: ComparisonMonteCarloResult) -> dict:
+    def _s(s: MonteCarloSummary) -> dict:
+        return {"mean": s.mean, "std": s.std, "p5": s.p5, "p50": s.p50, "p95": s.p95}
+
+    def _opt(r):
+        if r is None:
+            return None
+        return _s(r.summary)  # pvs arrays NEVER cross MCP boundary
+
+    result = {
+        "condo": _opt(mc.condo),
+        "house": _opt(mc.house),
+        "rent": _opt(mc.rent),
+        "prob_condo_cheapest": mc.prob_condo_cheapest,
+        "prob_house_cheapest": mc.prob_house_cheapest,
+        "prob_rent_cheapest": mc.prob_rent_cheapest,
+    }
+    if mc.affordability_mc is not None:
+        result["affordability_mc"] = {
+            "threshold": mc.affordability_mc.threshold,
+            "prob_condo_exceeds": mc.affordability_mc.prob_condo_exceeds,
+            "prob_house_exceeds": mc.affordability_mc.prob_house_exceeds,
+            "prob_rent_exceeds": mc.affordability_mc.prob_rent_exceeds,
+        }
+    else:
+        result["affordability_mc"] = None
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -50,57 +95,74 @@ def _mc_to_dict(mc: MonteCarloResult) -> dict:
 
 def define_scenario(name: str, config: dict) -> dict:
     """Define a named housing scenario. Config must include 'years', 'discount_rate',
-    'condo' (with 'monthly_fee'), and 'house' (with 'initial_value')."""
+    and at least one of 'condo', 'house', 'rent'. Optional 'income' for affordability."""
+    safe_name = Path(name).name
     try:
-        params = load_config_dict(config)
+        spec = load_config_dict(config)
     except (ConfigValidationError, ValueError, TypeError) as e:
-        return {"error": f"config invalid: {e}"}
-    existing = name in registry._REGISTRY
-    registry.define(name, raw_config=config, params=params)
-    condo, house, sim, _econ = params
-    result = {
-        "name": name,
+        return {"error": str(e)}
+
+    overwriting = safe_name in registry._REGISTRY
+    registry.define(safe_name, config, spec)
+    registry.store_results(safe_name)  # total-replace: clear any stale results
+
+    response = {
+        "name": safe_name,
         "status": "defined",
-        "condo_monthly_fee": condo.monthly_fee,
-        "house_initial_value": house.initial_value,
-        "years": sim.years,
+        "years": spec.simulation.years,
+        "discount_rate": spec.simulation.discount_rate,
     }
-    if existing:
-        result["previous_results_cleared"] = True
-    return result
+    # None-safe option summaries
+    if spec.condo is not None:
+        response["condo_monthly_fee"] = spec.condo.monthly_fee
+    if spec.house is not None:
+        response["house_initial_value"] = spec.house.initial_value
+    if spec.rent is not None:
+        response["rent_monthly_rent"] = spec.rent.monthly_rent
+    if spec.income is not None:
+        response["income_annual"] = spec.income.annual_income
+    if overwriting:
+        response["previous_results_cleared"] = True
+    return response
 
 
-def run_comparison(name: str, mode: str = "both") -> dict:
+def run_comparison(scenario_name: str, mode: str = "both") -> dict:
     """Run deterministic and/or Monte Carlo comparison for a named scenario.
     mode: 'deterministic' | 'monte_carlo' | 'both'."""
-    if mode not in ("deterministic", "monte_carlo", "both"):
-        return {"error": f"unsupported mode {mode!r}. Options: deterministic, monte_carlo, both"}
-    try:
-        entry = registry.get(name)
-    except KeyError:
-        return {"error": f"scenario not found: {name}"}
-    condo, house, sim, econ = entry.params
-    det = None
-    mc = None
-    if mode in ("deterministic", "both"):
-        det = compute_deterministic(condo, house, sim, econ)
-    if mode in ("monte_carlo", "both"):
-        mc = run_monte_carlo(condo, house, sim, econ)
-    registry.store_results(name, det_result=det, mc_result=mc)
-    result: dict = {
-        "name": name,
-        "mode": mode,
-        "report": format_text_report(det, mc, sim, econ),
-    }
-    if det is not None:
-        result["deterministic"] = _det_to_dict(det)
-    if mc is not None:
-        result["monte_carlo"] = _mc_to_dict(mc)
-    return result
+    safe_name = Path(scenario_name).name
+    if safe_name not in registry._REGISTRY:
+        return {"error": f"scenario '{safe_name}' not found"}
+    if mode not in {"deterministic", "monte_carlo", "both"}:
+        return {"error": f"unsupported mode '{mode}'; use deterministic, monte_carlo, or both"}
+
+    entry = registry.get(safe_name)
+    det_result = None
+    mc_result = None
+
+    if mode in {"deterministic", "both"}:
+        det_result = compute_deterministic(entry.spec)
+    if mode in {"monte_carlo", "both"}:
+        mc_result = run_monte_carlo(entry.spec)
+
+    registry.store_results(safe_name, det_result=det_result, mc_result=mc_result)
+
+    report = format_text_report(
+        det_result if det_result is not None else ComparisonDeterministicResult(),
+        mc_result,
+        entry.spec.simulation,
+        entry.spec.economic,
+    )
+
+    response = {"name": safe_name, "mode": mode, "report": report}
+    if det_result is not None:
+        response["deterministic"] = _det_to_dict(det_result)
+    if mc_result is not None:
+        response["monte_carlo"] = _mc_to_dict(mc_result)
+    return response
 
 
-# Whitelist: dot-notation param_path → (yaml_section_key, yaml_field_key)
-# section=None means the field is at the top level of the config dict.
+# Whitelist: dot-notation param_path → (spec_section_attr, dataclass_field)
+# section=None means the field lives on SimulationParams (top-level config keys).
 _SWEEP_PATHS: dict[str, tuple[str | None, str]] = {
     "years":                              (None, "years"),
     "discount_rate":                      (None, "discount_rate"),
@@ -113,72 +175,95 @@ _SWEEP_PATHS: dict[str, tuple[str | None, str]] = {
     "simulation.house_maintenance_vol":   ("simulation", "house_maintenance_vol"),
     "simulation.condo_fee_vol":           ("simulation", "condo_fee_vol"),
     "economic.inflation_rate":            ("economic", "inflation_rate"),
+    "rent.monthly_rent":                  ("rent", "monthly_rent"),
+    "rent.invested_down_payment":         ("rent", "invested_down_payment"),
+    "rent.investment_return_rate":        ("rent", "investment_return_rate"),
 }
 
 
-def sweep_param(name: str, param_path: str, values: list) -> dict:
+def sweep_param(scenario_name: str, param_path: str, values: list[float]) -> dict:
     """Sweep a scalar parameter across a list of values using the deterministic engine.
     param_path uses dot-notation (e.g. 'condo.monthly_fee', 'years'). Flat scalar fields only."""
+    import copy
+    import dataclasses as dc
+
+    safe_name = Path(scenario_name).name
+    if safe_name not in registry._REGISTRY:
+        return {"error": f"scenario '{safe_name}' not found"}
     if not values:
-        return {"error": "values must be a non-empty list"}
+        return {"error": "values list is empty"}
     if param_path not in _SWEEP_PATHS:
-        allowed = sorted(_SWEEP_PATHS.keys())
-        return {"error": f"unsupported param_path: {param_path!r}. Allowed: {allowed}"}
-    try:
-        entry = registry.get(name)
-    except KeyError:
-        return {"error": f"scenario not found: {name}"}
+        return {"error": f"unsupported param_path '{param_path}'. Supported: {sorted(_SWEEP_PATHS.keys())}"}
 
+    entry = registry.get(safe_name)
     section, field = _SWEEP_PATHS[param_path]
+
+    # Guard: option-section sweeps require that section to exist on the spec.
+    if section in {"condo", "house", "rent"} and getattr(entry.spec, section) is None:
+        return {"error": f"scenario '{safe_name}' has no {section} section; cannot sweep {param_path}"}
+
     rows = []
-    for value in values:
-        config = copy.deepcopy(entry.raw_config)
+    for v in values:
+        spec_copy = copy.deepcopy(entry.spec)
         if section is None:
-            config[field] = value
+            # top-level SimulationParams field
+            spec_copy = dc.replace(spec_copy, simulation=dc.replace(spec_copy.simulation, **{field: v}))
         else:
-            config.setdefault(section, {})[field] = value
+            section_obj = getattr(spec_copy, section)
+            new_section = dc.replace(section_obj, **{field: v})
+            spec_copy = dc.replace(spec_copy, **{section: new_section})
         try:
-            params = load_config_dict(config)
-        except ConfigValidationError as e:
-            return {"error": f"invalid value {value!r} for {param_path!r}: {e}"}
-        condo, house, sim, econ = params
-        try:
-            det = compute_deterministic(condo, house, sim, econ)
+            det = compute_deterministic(spec_copy)
+            row = {"value": v}
+            if det.condo is not None:
+                row["condo_total_pv"] = det.condo.total_pv
+            if det.house is not None:
+                row["house_total_pv"] = det.house.total_pv
+            if det.rent is not None:
+                row["rent_total_pv"] = det.rent.total_pv
+            rows.append(row)
         except Exception as e:
-            return {"error": f"computation failed for value {value!r}: {e}"}
-        rows.append({
-            "value": value,
-            "condo_pv_total": det.condo_pv_total,
-            "house_pv_total": det.house_pv_total,
-            "diff_pv": det.diff_pv,
-        })
-    return {"name": name, "param_path": param_path, "rows": rows}
+            rows.append({"value": v, "error": str(e)})
+
+    return {"name": safe_name, "param_path": param_path, "rows": rows}
 
 
-def save_figure(name: str, figure_type: str) -> dict:
+def save_figure(scenario_name: str, figure_type: str) -> dict:
     """Save a matplotlib figure for a scenario to the figure cache dir.
     figure_type: 'diff_distribution' | 'pv_distributions'.
     Returns {'path': '<absolute_path>'}.
     Requires run_comparison to have been called with mode='monte_carlo' or 'both' first."""
-    try:
-        entry = registry.get(name)
-    except KeyError:
-        return {"error": f"scenario not found: {name}"}
-    if entry.mc_result is None:
-        return {"error": f"no MC results for scenario {name!r} — run run_comparison first"}
-    if figure_type not in ("diff_distribution", "pv_distributions"):
-        return {"error": f"unknown figure_type {figure_type!r}. Options: diff_distribution, pv_distributions"}
+    safe_name = Path(scenario_name).name
+    if safe_name not in registry._REGISTRY:
+        return {"error": f"scenario '{safe_name}' not found"}
 
-    safe_name = Path(name).name  # strips any directory components
+    entry = registry.get(safe_name)
+    if entry.mc_result is None:
+        return {"error": "run run_comparison with mode='monte_carlo' or 'both' first"}
+
+    mc = entry.mc_result
+    if figure_type == "diff_distribution":
+        if mc.condo is None or mc.house is None:
+            return {"error": "diff_distribution requires both condo and house options"}
+        diff_pvs = mc.house.pvs - mc.condo.pvs
+        fig = plot_diff_distribution(diff_pvs)
+    elif figure_type == "pv_distributions":
+        option_arrays = {}
+        if mc.condo is not None:
+            option_arrays["Condo"] = mc.condo.pvs
+        if mc.house is not None:
+            option_arrays["House"] = mc.house.pvs
+        if mc.rent is not None:
+            option_arrays["Rent"] = mc.rent.pvs
+        if not option_arrays:
+            return {"error": "no option arrays available for pv_distributions"}
+        fig = plot_pv_distributions(option_arrays)
+    else:
+        return {"error": f"unknown figure_type '{figure_type}'. Use diff_distribution or pv_distributions"}
+
     FIGURE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     ts = int(time.time_ns())
     path = FIGURE_CACHE_DIR / f"{safe_name}_{figure_type}_{ts}.png"
-
-    if figure_type == "diff_distribution":
-        fig = plot_diff_distribution(entry.mc_result)
-    else:
-        fig = plot_pv_distributions(entry.mc_result)
-
     fig.savefig(str(path), dpi=150, bbox_inches="tight")
     plt.close(fig)
     return {"path": str(path)}
