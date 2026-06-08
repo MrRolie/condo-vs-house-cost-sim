@@ -13,6 +13,7 @@ from hde.models import (
 from mcp_server import registry
 import mcp_server.tools as tools_module
 from mcp_server.tools import _det_to_dict, _mc_to_dict, define_scenario, run_comparison, sweep_param, save_figure
+from mcp_server.tools import list_scenarios, delete_scenario
 
 
 @pytest.fixture(autouse=True)
@@ -235,3 +236,32 @@ def test_save_figure_missing_scenario(tmp_path, monkeypatch):
     monkeypatch.setattr(tools_module, "FIGURE_CACHE_DIR", tmp_path)
     result = save_figure("nonexistent", "diff_distribution")
     assert "error" in result
+
+
+# --- list_scenarios + delete_scenario ---
+
+def test_list_scenarios_empty():
+    result = list_scenarios()
+    assert result == {"scenarios": [], "count": 0}
+
+
+def test_list_scenarios_with_entries():
+    define_scenario("a", BASIC_CONFIG)
+    define_scenario("b", BASIC_CONFIG)
+    result = list_scenarios()
+    assert result["count"] == 2
+    names = {s["name"] for s in result["scenarios"]}
+    assert names == {"a", "b"}
+
+
+def test_delete_scenario_existing():
+    define_scenario("s1", BASIC_CONFIG)
+    result = delete_scenario("s1")
+    assert result == {"deleted": "s1"}
+    assert list_scenarios()["count"] == 0
+
+
+def test_delete_scenario_missing():
+    result = delete_scenario("nonexistent")
+    assert "error" in result
+    assert "nonexistent" in result["error"]

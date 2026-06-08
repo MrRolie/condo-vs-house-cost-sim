@@ -170,3 +170,18 @@ def save_figure(name: str, figure_type: str) -> dict:
     fig.savefig(str(path), dpi=150, bbox_inches="tight")
     plt.close(fig)
     return {"path": str(path)}
+
+
+def list_scenarios() -> dict:
+    """List all scenarios defined in this session with their result-cached status."""
+    entries = registry.all_entries()
+    return {"scenarios": entries, "count": len(entries)}
+
+
+def delete_scenario(name: str) -> dict:
+    """Remove a scenario from the session registry."""
+    try:
+        registry.remove(name)
+    except KeyError:
+        return {"error": f"scenario not found: {name}"}
+    return {"deleted": name}
