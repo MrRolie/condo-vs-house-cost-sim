@@ -6,7 +6,7 @@ them into the appropriate dataclass instances.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -17,6 +17,10 @@ from .models import (
     EconomicParams,
     EventConfig,
     RecurringOtherCost,
+    ComparisonSpec,
+    PayDropEvent,
+    RentParams,
+    IncomeParams,
 )
 
 
@@ -101,6 +105,20 @@ def _parse_recurring_cost(cost_data: Dict[str, Any]) -> RecurringOtherCost:
     )
 
 
+def _parse_pay_drop_event(data: Dict[str, Any]) -> PayDropEvent:
+    """Parse a PayDropEvent from YAML data."""
+    if "year" not in data:
+        raise ConfigValidationError("pay_drop_event missing required field: year")
+    if "magnitude" not in data:
+        raise ConfigValidationError("pay_drop_event missing required field: magnitude")
+    return PayDropEvent(
+        year=int(data["year"]),
+        magnitude=float(data["magnitude"]),
+        year_jitter_std=float(data.get("year_jitter_std", 0.0)),
+        magnitude_vol=float(data.get("magnitude_vol", 0.0)),
+    )
+
+
 def _parse_condo(condo_data: Dict[str, Any], years: int) -> CondoParams:
     """
     Parse condo parameters from YAML data.
@@ -164,6 +182,35 @@ def _parse_house(house_data: Dict[str, Any], years: int) -> HouseParams:
     )
 
 
+def _parse_rent(data: Dict[str, Any], years: int) -> RentParams:
+    """Parse RentParams from YAML data."""
+    if "monthly_rent" not in data:
+        raise ConfigValidationError("rent section missing required field: monthly_rent")
+    events = [_parse_event(e, years) for e in data.get("events", [])]
+    other = [_parse_recurring_cost(c) for c in data.get("other_recurring_costs", [])]
+    return RentParams(
+        monthly_rent=float(data["monthly_rent"]),
+        rent_escalation_rate=float(data.get("rent_escalation_rate", 0.03)),
+        invested_down_payment=float(data.get("invested_down_payment", 0.0)),
+        investment_return_rate=float(data.get("investment_return_rate", 0.07)),
+        events=events,
+        other_recurring_costs=other,
+    )
+
+
+def _parse_income(data: Dict[str, Any]) -> IncomeParams:
+    """Parse IncomeParams from YAML data."""
+    if "annual_income" not in data:
+        raise ConfigValidationError("income section missing required field: annual_income")
+    events = [_parse_pay_drop_event(e) for e in data.get("pay_drop_events", [])]
+    return IncomeParams(
+        annual_income=float(data["annual_income"]),
+        income_growth_rate=float(data.get("income_growth_rate", 0.03)),
+        affordability_threshold=float(data.get("affordability_threshold", 0.35)),
+        pay_drop_events=events,
+    )
+
+
 def _parse_simulation(sim_data: Optional[Dict[str, Any]], years: int, discount_rate: float) -> SimulationParams:
     """
     Parse simulation parameters from YAML data.
@@ -187,6 +234,8 @@ def _parse_simulation(sim_data: Optional[Dict[str, Any]], years: int, discount_r
         corr_inflation_other=float(sim_data.get("corr_inflation_other", 0.0)),
         corr_inflation_event_cost=float(sim_data.get("corr_inflation_event_cost", 0.0)),
         shock_model=shock_model,  # type: ignore
+        rent_escalation_vol=float(sim_data.get("rent_escalation_vol", 0.0)),
+        investment_return_vol=float(sim_data.get("investment_return_vol", 0.0)),
     )
 
 
@@ -208,28 +257,30 @@ def _parse_economic(econ_data: Optional[Dict[str, Any]]) -> EconomicParams:
     )
 
 
-def validate_config(
-    condo: CondoParams,
-    house: HouseParams,
-    sim: SimulationParams,
-    econ: EconomicParams,
-) -> List[str]:
+def validate_config(spec: ComparisonSpec) -> List[str]:
     """
     Validate configuration parameters.
-    
+
     Returns a list of warning/error messages. Empty list means valid.
     """
     warnings = []
-    
+
+    # At least one housing/rent option must be provided
+    if spec.condo is None and spec.house is None and spec.rent is None:
+        warnings.append("At least one of condo, house, or rent must be defined")
+
+    sim = spec.simulation
+    econ = spec.economic
+
     if sim.years < 1:
         warnings.append(f"years must be >= 1, got {sim.years}")
-    
+
     if sim.discount_rate < 0:
         warnings.append(f"discount_rate should be >= 0, got {sim.discount_rate}")
-    
+
     if sim.num_sims < 1:
         warnings.append(f"num_sims must be >= 1, got {sim.num_sims}")
-    
+
     if sim.other_cost_vol < 0:
         warnings.append(f"other_cost_vol should be >= 0, got {sim.other_cost_vol}")
 
@@ -241,34 +292,41 @@ def validate_config(
     ]:
         if rho < -1 or rho > 1:
             warnings.append(f"{name} should be between -1 and 1, got {rho}")
-    
+
     if sim.shock_model not in ("lognormal", "normal"):
         warnings.append(f"shock_model must be 'lognormal' or 'normal', got {sim.shock_model}")
-    
-    if condo.monthly_fee < 0:
-        warnings.append(f"condo.monthly_fee should be >= 0, got {condo.monthly_fee}")
-    if condo.reserve_contribution_rate < 0:
-        warnings.append(f"condo.reserve_contribution_rate should be >= 0, got {condo.reserve_contribution_rate}")
-    if condo.reserve_initial_balance < 0:
-        warnings.append(f"condo.reserve_initial_balance should be >= 0, got {condo.reserve_initial_balance}")
-    if condo.reserve_growth_rate < -1:
-        warnings.append(f"condo.reserve_growth_rate should be > -1, got {condo.reserve_growth_rate}")
-    
-    if house.initial_value < 0:
-        warnings.append(f"house.initial_value should be >= 0, got {house.initial_value}")
-    
-    if house.annual_maintenance_rate < 0 or house.annual_maintenance_rate > 1:
-        warnings.append(
-            f"house.annual_maintenance_rate should be in [0, 1], got {house.annual_maintenance_rate}"
-        )
-    for year, rate in house.maintenance_curve:
-        if year < 1:
-            warnings.append(f"maintenance_curve year must be >=1, got {year}")
-        if rate < 0 or rate > 1:
-            warnings.append(f"maintenance_curve rate should be in [0,1], got {rate}")
-    
-    # Validate events
-    for event in condo.events + house.events:
+
+    if spec.condo is not None:
+        condo = spec.condo
+        if condo.monthly_fee < 0:
+            warnings.append(f"condo.monthly_fee should be >= 0, got {condo.monthly_fee}")
+        if condo.reserve_contribution_rate < 0:
+            warnings.append(f"condo.reserve_contribution_rate should be >= 0, got {condo.reserve_contribution_rate}")
+        if condo.reserve_initial_balance < 0:
+            warnings.append(f"condo.reserve_initial_balance should be >= 0, got {condo.reserve_initial_balance}")
+        if condo.reserve_growth_rate < -1:
+            warnings.append(f"condo.reserve_growth_rate should be > -1, got {condo.reserve_growth_rate}")
+
+    if spec.house is not None:
+        house = spec.house
+        if house.initial_value < 0:
+            warnings.append(f"house.initial_value should be >= 0, got {house.initial_value}")
+
+        if house.annual_maintenance_rate < 0 or house.annual_maintenance_rate > 1:
+            warnings.append(
+                f"house.annual_maintenance_rate should be in [0, 1], got {house.annual_maintenance_rate}"
+            )
+        for year, rate in house.maintenance_curve:
+            if year < 1:
+                warnings.append(f"maintenance_curve year must be >=1, got {year}")
+            if rate < 0 or rate > 1:
+                warnings.append(f"maintenance_curve rate should be in [0,1], got {rate}")
+
+    # Validate events from whichever options are present
+    condo_events = spec.condo.events if spec.condo is not None else []
+    house_events = spec.house.events if spec.house is not None else []
+    rent_events = spec.rent.events if spec.rent is not None else []
+    for event in condo_events + house_events + rent_events:
         if event.expected_year > sim.years:
             warnings.append(
                 f"Event '{event.name}' has expected_year ({event.expected_year}) > years ({sim.years})"
@@ -285,98 +343,114 @@ def validate_config(
             warnings.append(
                 f"Event '{event.name}' cost_distribution must be 'normal' or 'lognormal', got {event.cost_distribution}"
             )
-    
+
+    if spec.rent is not None:
+        rent = spec.rent
+        if rent.monthly_rent <= 0:
+            warnings.append(f"rent.monthly_rent must be positive, got {rent.monthly_rent}")
+        if not (0 <= rent.rent_escalation_rate < 0.20):
+            warnings.append(f"rent.rent_escalation_rate must be between 0 and 0.20 (inclusive), got {rent.rent_escalation_rate}")
+        if rent.invested_down_payment < 0:
+            warnings.append(f"rent.invested_down_payment must be non-negative, got {rent.invested_down_payment}")
+        if not (0 <= rent.investment_return_rate < 0.25):
+            warnings.append(f"rent.investment_return_rate must be between 0 and 0.25 (inclusive), got {rent.investment_return_rate}")
+
+    if spec.income is not None:
+        income = spec.income
+        if income.annual_income <= 0:
+            warnings.append(f"income.annual_income must be positive, got {income.annual_income}")
+        if not (0 < income.affordability_threshold < 1):
+            warnings.append(f"income.affordability_threshold must be between 0 and 1, got {income.affordability_threshold}")
+        for event in income.pay_drop_events:
+            if not (0 < event.magnitude <= 1):
+                warnings.append(f"pay_drop_event year={event.year}: magnitude must be in (0, 1]")
+
     if econ.inflation_vol < 0:
         warnings.append(f"inflation_vol should be >= 0, got {econ.inflation_vol}")
-    
+
     return warnings
 
 
-def load_config(
-    path: str,
-) -> Tuple[CondoParams, HouseParams, SimulationParams, EconomicParams]:
+def load_config(path: str) -> ComparisonSpec:
     """
     Load configuration from a YAML file.
-    
+
     Args:
         path: Path to the YAML configuration file
-    
+
     Returns:
-        Tuple of (CondoParams, HouseParams, SimulationParams, EconomicParams)
-    
+        ComparisonSpec populated from the YAML file
+
     Raises:
         ConfigValidationError: If required fields are missing or invalid
         FileNotFoundError: If the config file doesn't exist
         yaml.YAMLError: If the YAML is malformed
-    
+
     Example:
-        >>> condo, house, sim, econ = load_config("examples/basic_config.yaml")
+        >>> spec = load_config("examples/basic_config.yaml")
     """
     config_path = Path(path)
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {path}")
-    
+
     with open(config_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    
+
     if data is None:
         raise ConfigValidationError("Empty configuration file")
-    
+
     # Required top-level fields
     if "years" not in data:
         raise ConfigValidationError("Missing required field: years")
     if "discount_rate" not in data:
         raise ConfigValidationError("Missing required field: discount_rate")
-    if "condo" not in data:
-        raise ConfigValidationError("Missing required section: condo")
-    if "house" not in data:
-        raise ConfigValidationError("Missing required section: house")
-    
+
     years = int(data["years"])
     discount_rate = float(data["discount_rate"])
-    
-    condo = _parse_condo(data["condo"], years)
-    house = _parse_house(data["house"], years)
+
+    condo = _parse_condo(data["condo"], years) if "condo" in data else None
+    house = _parse_house(data["house"], years) if "house" in data else None
+    rent = _parse_rent(data["rent"], years) if "rent" in data else None
+    income = _parse_income(data["income"]) if "income" in data else None
     sim = _parse_simulation(data.get("simulation"), years, discount_rate)
     econ = _parse_economic(data.get("economic"))
-    
-    # Validate
-    warnings = validate_config(condo, house, sim, econ)
+
+    spec = ComparisonSpec(simulation=sim, economic=econ, condo=condo, house=house, rent=rent, income=income)
+    warnings = validate_config(spec)
     if warnings:
         raise ConfigValidationError("Configuration validation failed:\n" + "\n".join(warnings))
-    
-    return condo, house, sim, econ
+
+    return spec
 
 
-def load_config_dict(data: Dict[str, Any]) -> Tuple[CondoParams, HouseParams, SimulationParams, EconomicParams]:
+def load_config_dict(data: Dict[str, Any]) -> ComparisonSpec:
     """
     Load configuration from a dictionary (useful for programmatic config).
-    
+
     Args:
         data: Configuration dictionary (same structure as YAML)
-    
+
     Returns:
-        Tuple of (CondoParams, HouseParams, SimulationParams, EconomicParams)
+        ComparisonSpec populated from the dictionary
     """
     if "years" not in data:
         raise ConfigValidationError("Missing required field: years")
     if "discount_rate" not in data:
         raise ConfigValidationError("Missing required field: discount_rate")
-    if "condo" not in data:
-        raise ConfigValidationError("Missing required section: condo")
-    if "house" not in data:
-        raise ConfigValidationError("Missing required section: house")
-    
+
     years = int(data["years"])
     discount_rate = float(data["discount_rate"])
-    
-    condo = _parse_condo(data["condo"], years)
-    house = _parse_house(data["house"], years)
+
+    condo = _parse_condo(data["condo"], years) if "condo" in data else None
+    house = _parse_house(data["house"], years) if "house" in data else None
+    rent = _parse_rent(data["rent"], years) if "rent" in data else None
+    income = _parse_income(data["income"]) if "income" in data else None
     sim = _parse_simulation(data.get("simulation"), years, discount_rate)
     econ = _parse_economic(data.get("economic"))
-    
-    warnings = validate_config(condo, house, sim, econ)
+
+    spec = ComparisonSpec(simulation=sim, economic=econ, condo=condo, house=house, rent=rent, income=income)
+    warnings = validate_config(spec)
     if warnings:
         raise ConfigValidationError("Configuration validation failed:\n" + "\n".join(warnings))
-    
-    return condo, house, sim, econ
+
+    return spec

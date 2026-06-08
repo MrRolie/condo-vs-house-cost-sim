@@ -21,10 +21,16 @@ from .models import (
     EconomicParams,
     EventConfig,
     RecurringOtherCost,
-    MonteCarloResult,
     MonteCarloSummary,
+    ComparisonSpec,
+    ComparisonMonteCarloResult,
+    MonteCarloOptionResult,
+    AffordabilityMCReport,
+    RentParams,
+    IncomeParams,
+    PayDropEvent,
 )
-from .pv import pv_single
+from .pv import pv_single, pv_recurring_with_escalation
 
 
 def _effective_growth_rate(base_rate: float, inflation_factor: float, econ: EconomicParams) -> float:
@@ -310,63 +316,269 @@ def _simulate_house_pv_once(
     return pv
 
 
-def run_monte_carlo(
-    condo: CondoParams,
-    house: HouseParams,
+def _simulate_rent_pv_once(
+    rent: RentParams,
     sim: SimulationParams,
     econ: EconomicParams,
-) -> MonteCarloResult:
+    rng: np.random.Generator,
+) -> float:
     """
-    Run Monte Carlo simulation for condo vs house cost comparison.
-    
-    Simulates randomness in:
-    - Condo annual fees (via sim.condo_fee_vol)
-    - House annual maintenance (via sim.house_maintenance_vol)
-    - Event timing (via EventConfig.timing_std_years)
-    - Event costs (via EventConfig.cost_vol)
-    
+    Run one simulation of rent PV with randomness.
+
+    Mirrors the deterministic rent model (`_compute_rent_option`) but layers on:
+    - Rent escalation shock (if sim.rent_escalation_vol > 0)
+    - Event costs and timing (jitter or hazard)
+    - Other recurring cost volatility (if sim.other_cost_vol > 0)
+    - Investment-return shock on the invested down payment
+      (if sim.investment_return_vol > 0)
+
+    Discounting uses `sim.discount_rate` directly, matching the condo/house
+    simulators and the deterministic rent model.
+    """
+    dr = sim.discount_rate
+
+    # Base escalation, folding in nominal-mode inflation the same way the
+    # deterministic rent model does (so zero-vol MC converges to deterministic
+    # in both real and nominal modes).
+    base_esc = rent.rent_escalation_rate
+    if econ.mode == "nominal":
+        base_esc = (1 + base_esc) * (1 + econ.inflation_rate) - 1
+
+    # Rent escalation, optionally shocked.
+    if sim.rent_escalation_vol > 0:
+        z_esc = float(rng.normal())
+        esc_shock = _shock_multiplier(sim.rent_escalation_vol, z_esc, sim.shock_model)
+        effective_esc = base_esc * esc_shock
+    else:
+        effective_esc = base_esc
+
+    annual_rent = rent.monthly_rent * 12
+    rent_pv = pv_recurring_with_escalation(annual_rent, effective_esc, dr, sim.years)
+
+    # Events (same pattern as condo/house: None-guarded, correlated z draw).
+    events_pv = 0.0
+    event_years = {event.name: _sample_event_year(event, sim.years, rng) for event in rent.events}
+    for event in rent.events:
+        year = event_years[event.name]
+        if year is None:
+            continue
+        z_event = _correlated_z(0.0, sim.corr_inflation_event_cost, rng)
+        event_cost = _sample_event_cost(event, z_event)
+        events_pv += pv_single(event_cost, dr, year)
+
+    # Other recurring costs, optionally shocked (level shock applied to the series).
+    other_pv = 0.0
+    for cost in rent.other_recurring_costs:
+        if sim.other_cost_vol > 0:
+            z_other = float(rng.normal())
+            shock = _shock_multiplier(sim.other_cost_vol, z_other, sim.shock_model)
+            annual = cost.annual_amount * shock
+        else:
+            annual = cost.annual_amount
+        other_pv += pv_recurring_with_escalation(annual, cost.escalation_rate, dr, sim.years)
+
+    # Invested down-payment benefit (reduces net cost of renting).
+    if rent.invested_down_payment > 0:
+        if sim.investment_return_vol > 0:
+            z_inv = float(rng.normal())
+            r_shock = _shock_multiplier(sim.investment_return_vol, z_inv, sim.shock_model)
+            r_inv = rent.investment_return_rate * r_shock
+        else:
+            r_inv = rent.investment_return_rate
+        benefit = rent.invested_down_payment * ((1 + r_inv) ** sim.years) / ((1 + dr) ** sim.years)
+    else:
+        benefit = 0.0
+
+    return rent_pv + events_pv + other_pv - benefit
+
+
+def _compute_income_affordability_once(
+    income: IncomeParams,
+    sim: SimulationParams,
+    condo_annual_costs: List[float],
+    house_annual_costs: List[float],
+    rent_annual_costs: List[float],
+    rng: np.random.Generator,
+) -> dict:
+    """
+    For one MC path, draw a stochastic income trajectory and report, per option,
+    whether the housing cost/income ratio exceeded the affordability threshold in
+    any year.
+
+    A single income trajectory is drawn per call and shared across all present
+    options (pay-drop timing/magnitude are common to the household, not the
+    housing choice).
+    """
+    threshold = income.affordability_threshold
+
+    # Pre-draw jittered years for each pay-drop event (once per sim path).
+    # Drawing inside the year loop would allow a single event to fire in
+    # multiple years or be missed entirely within one simulation path.
+    event_years: dict = {}
+    for event in income.pay_drop_events:
+        if event.year_jitter_std > 0:
+            ev_year = max(1, min(sim.years, round(event.year + rng.normal(0, event.year_jitter_std))))
+        else:
+            ev_year = event.year
+        event_years[id(event)] = ev_year
+
+    # One stochastic income trajectory, shared across options.
+    traj: List[float] = []
+    inc = income.annual_income
+    for t in range(sim.years):
+        year = t + 1
+        for event in income.pay_drop_events:
+            if event_years[id(event)] == year:
+                if event.magnitude_vol > 0:
+                    mag = event.magnitude * float(np.exp(rng.normal(0, event.magnitude_vol)))
+                    mag = min(max(mag, 0.01), 1.0)
+                else:
+                    mag = event.magnitude
+                inc *= mag
+        traj.append(inc)
+        if t < sim.years - 1:
+            inc *= (1 + income.income_growth_rate)
+
+    result = {}
+    for option_type, costs in [
+        ("condo", condo_annual_costs),
+        ("house", house_annual_costs),
+        ("rent", rent_annual_costs),
+    ]:
+        if not costs:
+            continue
+        exceeds = any(c / i > threshold for c, i in zip(costs, traj) if i > 0)
+        result[option_type] = exceeds
+
+    return result
+
+
+def run_monte_carlo(spec: ComparisonSpec) -> ComparisonMonteCarloResult:
+    """
+    Run Monte Carlo simulation for all options present in the spec.
+
+    Simulates each present option (condo / house / rent) over `num_sims` paths,
+    deriving per-option PV distributions, pairwise ranking probabilities
+    (which option is cheapest), and — if income params are present — the
+    probability that each option's cost/income ratio breaches the affordability
+    threshold in any year.
+
     Args:
-        condo: Condo cost parameters
-        house: House cost parameters
-        sim: Simulation parameters including volatilities and num_sims
-        econ: Economic parameters (reserved for future extensions)
-    
+        spec: ComparisonSpec bundling simulation/economic params and the
+            present option parameters (condo/house/rent/income).
+
     Returns:
-        MonteCarloResult with arrays of simulated PVs and summary statistics
-    
+        ComparisonMonteCarloResult with per-option results, ranking
+        probabilities, and an optional affordability MC report.
+
     Note:
-        - Other recurring costs are treated deterministically in v1
-        - RNG is seeded with sim.random_seed for reproducibility
-        - This function has no side effects and does not print anything
+        - Only options present in the spec are simulated.
+        - RNG is seeded with sim.random_seed for reproducibility.
+        - Per-iteration draw order is condo -> house -> rent -> income, so
+          existing condo+house numerics are preserved when rent/income absent.
+        - This function has no side effects and does not print anything.
     """
+    sim = spec.simulation
+    econ = spec.economic
     rng = np.random.default_rng(sim.random_seed)
-    
-    # Preallocate arrays
-    condo_pv = np.empty(sim.num_sims, dtype=np.float64)
-    house_pv = np.empty(sim.num_sims, dtype=np.float64)
-    
-    # Run simulations
-    for i in range(sim.num_sims):
-        condo_pv[i] = _simulate_condo_pv_once(condo, sim, econ, rng)
-        house_pv[i] = _simulate_house_pv_once(house, sim, econ, rng)
-    
-    # Compute difference
-    diff_pv = house_pv - condo_pv
-    
-    # Compute summaries
-    condo_summary = _summarize_array(condo_pv)
-    house_summary = _summarize_array(house_pv)
-    diff_summary = _summarize_array(diff_pv)
-    
-    # Probability that house is more expensive
-    prob_house_more_expensive = float(np.mean(diff_pv > 0))
-    
-    return MonteCarloResult(
-        condo_pv=condo_pv,
-        house_pv=house_pv,
-        diff_pv=diff_pv,
-        condo_summary=condo_summary,
-        house_summary=house_summary,
-        diff_summary=diff_summary,
-        prob_house_more_expensive=prob_house_more_expensive,
+
+    n = sim.num_sims
+    condo_pvs = np.empty(n, dtype=np.float64) if spec.condo is not None else None
+    house_pvs = np.empty(n, dtype=np.float64) if spec.house is not None else None
+    rent_pvs = np.empty(n, dtype=np.float64) if spec.rent is not None else None
+
+    # Pre-compute deterministic annual costs for affordability (done once, not per-sim).
+    afford_condo_costs: List[float] = []
+    afford_house_costs: List[float] = []
+    afford_rent_costs: List[float] = []
+    if spec.income is not None:
+        from .deterministic import _annual_costs_for_option
+        if spec.condo is not None:
+            afford_condo_costs = _annual_costs_for_option("condo", spec.condo, sim, econ)
+        if spec.house is not None:
+            afford_house_costs = _annual_costs_for_option("house", spec.house, sim, econ)
+        if spec.rent is not None:
+            afford_rent_costs = _annual_costs_for_option("rent", spec.rent, sim, econ)
+
+    afford_condo_flags = (
+        np.zeros(n, dtype=bool) if spec.condo is not None and spec.income is not None else None
+    )
+    afford_house_flags = (
+        np.zeros(n, dtype=bool) if spec.house is not None and spec.income is not None else None
+    )
+    afford_rent_flags = (
+        np.zeros(n, dtype=bool) if spec.rent is not None and spec.income is not None else None
+    )
+
+    for i in range(n):
+        if spec.condo is not None:
+            condo_pvs[i] = _simulate_condo_pv_once(spec.condo, sim, econ, rng)
+        if spec.house is not None:
+            house_pvs[i] = _simulate_house_pv_once(spec.house, sim, econ, rng)
+        if spec.rent is not None:
+            rent_pvs[i] = _simulate_rent_pv_once(spec.rent, sim, econ, rng)
+        if spec.income is not None:
+            flags = _compute_income_affordability_once(
+                spec.income, sim,
+                afford_condo_costs, afford_house_costs, afford_rent_costs,
+                rng,
+            )
+            if afford_condo_flags is not None:
+                afford_condo_flags[i] = flags.get("condo", False)
+            if afford_house_flags is not None:
+                afford_house_flags[i] = flags.get("house", False)
+            if afford_rent_flags is not None:
+                afford_rent_flags[i] = flags.get("rent", False)
+
+    def _make_opt(pvs):
+        if pvs is None:
+            return None
+        return MonteCarloOptionResult(pvs=pvs, summary=_summarize_array(pvs))
+
+    condo_result = _make_opt(condo_pvs)
+    house_result = _make_opt(house_pvs)
+    rent_result = _make_opt(rent_pvs)
+
+    # Ranking probabilities — require the arrays, so computed here (not recoverable
+    # from scalar summaries). Only meaningful with >= 2 present options.
+    present = [
+        (name, pvs)
+        for name, pvs in [("condo", condo_pvs), ("house", house_pvs), ("rent", rent_pvs)]
+        if pvs is not None
+    ]
+    prob_condo = prob_house = prob_rent = None
+    if len(present) >= 2:
+        stacked = np.stack([pvs for _, pvs in present], axis=0)  # (n_options, n_sims)
+        winners = np.argmin(stacked, axis=0)  # index of cheapest option per sim
+        idx = {name: k for k, (name, _) in enumerate(present)}
+        if "condo" in idx:
+            prob_condo = float(np.mean(winners == idx["condo"]))
+        if "house" in idx:
+            prob_house = float(np.mean(winners == idx["house"]))
+        if "rent" in idx:
+            prob_rent = float(np.mean(winners == idx["rent"]))
+
+    affordability_mc = None
+    if spec.income is not None:
+        affordability_mc = AffordabilityMCReport(
+            threshold=spec.income.affordability_threshold,
+            prob_condo_exceeds=(
+                float(np.mean(afford_condo_flags)) if afford_condo_flags is not None else None
+            ),
+            prob_house_exceeds=(
+                float(np.mean(afford_house_flags)) if afford_house_flags is not None else None
+            ),
+            prob_rent_exceeds=(
+                float(np.mean(afford_rent_flags)) if afford_rent_flags is not None else None
+            ),
+        )
+
+    return ComparisonMonteCarloResult(
+        condo=condo_result,
+        house=house_result,
+        rent=rent_result,
+        prob_condo_cheapest=prob_condo,
+        prob_house_cheapest=prob_house,
+        prob_rent_cheapest=prob_rent,
+        affordability_mc=affordability_mc,
     )
