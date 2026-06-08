@@ -91,3 +91,54 @@ def run_comparison(name: str, mode: str = "both") -> dict:
     if mc is not None:
         result["monte_carlo"] = _mc_to_dict(mc)
     return result
+
+
+# Whitelist: dot-notation param_path → (yaml_section_key, yaml_field_key)
+# section=None means the field is at the top level of the config dict.
+_SWEEP_PATHS: dict[str, tuple[str | None, str]] = {
+    "years":                              (None, "years"),
+    "discount_rate":                      (None, "discount_rate"),
+    "condo.monthly_fee":                  ("condo", "monthly_fee"),
+    "condo.fee_escalation_rate":          ("condo", "fee_escalation_rate"),
+    "condo.reserve_contribution_rate":    ("condo", "reserve_contribution_rate"),
+    "house.initial_value":                ("house", "initial_value"),
+    "house.value_growth_rate":            ("house", "value_growth_rate"),
+    "house.annual_maintenance_rate":      ("house", "annual_maintenance_rate"),
+    "simulation.house_maintenance_vol":   ("simulation", "house_maintenance_vol"),
+    "simulation.condo_fee_vol":           ("simulation", "condo_fee_vol"),
+    "economic.inflation_rate":            ("economic", "inflation_rate"),
+}
+
+
+def sweep_param(name: str, param_path: str, values: list) -> dict:
+    """Sweep a scalar parameter across a list of values using the deterministic engine.
+    param_path uses dot-notation (e.g. 'condo.monthly_fee', 'years'). Flat scalar fields only."""
+    if param_path not in _SWEEP_PATHS:
+        allowed = sorted(_SWEEP_PATHS.keys())
+        return {"error": f"unsupported param_path: {param_path!r}. Allowed: {allowed}"}
+    try:
+        entry = registry.get(name)
+    except KeyError:
+        return {"error": f"scenario not found: {name}"}
+
+    section, field = _SWEEP_PATHS[param_path]
+    rows = []
+    for value in values:
+        config = copy.deepcopy(entry.raw_config)
+        if section is None:
+            config[field] = value
+        else:
+            config.setdefault(section, {})[field] = value
+        try:
+            params = load_config_dict(config)
+        except ConfigValidationError as e:
+            return {"error": f"invalid value {value!r} for {param_path!r}: {e}"}
+        condo, house, sim, econ = params
+        det = compute_deterministic(condo, house, sim, econ)
+        rows.append({
+            "value": value,
+            "condo_pv_total": det.condo_pv_total,
+            "house_pv_total": det.house_pv_total,
+            "diff_pv": det.diff_pv,
+        })
+    return {"name": name, "param_path": param_path, "rows": rows}

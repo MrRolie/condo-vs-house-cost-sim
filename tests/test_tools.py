@@ -1,14 +1,16 @@
 # tests/test_tools.py
+import copy
 import json
 import pytest
 import numpy as np
+from hde.config import load_config_dict
 from hde.models import (
     DeterministicResult,
     MonteCarloResult,
     MonteCarloSummary,
 )
 from mcp_server import registry
-from mcp_server.tools import _det_to_dict, _mc_to_dict, define_scenario, run_comparison
+from mcp_server.tools import _det_to_dict, _mc_to_dict, define_scenario, run_comparison, sweep_param
 
 
 @pytest.fixture(autouse=True)
@@ -127,3 +129,64 @@ def test_run_comparison_missing_scenario():
     result = run_comparison("nonexistent")
     assert "error" in result
     assert "nonexistent" in result["error"]
+
+
+# --- sweep_param ---
+
+def test_sweep_param_returns_rows():
+    define_scenario("s1", BASIC_CONFIG)
+    result = sweep_param("s1", "condo.monthly_fee", [400.0, 500.0, 600.0])
+    assert "rows" in result
+    assert len(result["rows"]) == 3
+    assert result["param_path"] == "condo.monthly_fee"
+    # Higher fee → higher condo PV → lower diff_pv (house relatively cheaper)
+    pv_totals = [r["condo_pv_total"] for r in result["rows"]]
+    assert pv_totals[0] < pv_totals[1] < pv_totals[2]
+
+
+def test_sweep_param_top_level_key():
+    define_scenario("s1", BASIC_CONFIG)
+    result = sweep_param("s1", "years", [10, 20, 30])
+    assert len(result["rows"]) == 3
+
+
+def test_sweep_param_invalid_path_returns_error():
+    define_scenario("s1", BASIC_CONFIG)
+    result = sweep_param("s1", "house.events.0.base_cost", [1000.0])
+    assert "error" in result
+    assert "unsupported" in result["error"]
+
+
+def test_sweep_param_missing_scenario():
+    result = sweep_param("nonexistent", "years", [10, 20])
+    assert "error" in result
+    assert "nonexistent" in result["error"]
+
+
+def test_sweep_does_not_mutate_registry_config():
+    define_scenario("s1", BASIC_CONFIG)
+    original_fee = registry.get("s1").raw_config["condo"]["monthly_fee"]
+    sweep_param("s1", "condo.monthly_fee", [999.0])
+    assert registry.get("s1").raw_config["condo"]["monthly_fee"] == original_fee
+
+
+def test_sweep_paths_resolve_against_live_dataclass_fields():
+    """Drift guard: each _SWEEP_PATHS entry must produce a valid config that load_config_dict accepts."""
+    from mcp_server.tools import _SWEEP_PATHS
+    base = {
+        "years": 20, "discount_rate": 0.03,
+        "condo": {"monthly_fee": 500, "fee_escalation_rate": 0.02, "reserve_contribution_rate": 0.01},
+        "house": {"initial_value": 400_000, "value_growth_rate": 0.01, "annual_maintenance_rate": 0.015},
+        "simulation": {"house_maintenance_vol": 0.3, "condo_fee_vol": 0.05},
+        "economic": {"inflation_rate": 0.02},
+    }
+    for path, (section, field) in _SWEEP_PATHS.items():
+        config = copy.deepcopy(base)
+        if section is None:
+            config[field] = base.get(field, 20)
+        else:
+            config.setdefault(section, {})[field] = base.get(section, {}).get(field, 0.01)
+        try:
+            load_config_dict(config)
+        except Exception as e:
+            pytest.fail(f"_SWEEP_PATHS[{path!r}] → invalid config: {e}")
