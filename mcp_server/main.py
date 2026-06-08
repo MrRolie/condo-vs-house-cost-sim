@@ -25,12 +25,14 @@ mcp = FastMCP(
 def define_scenario_tool(name: str, config: dict) -> dict:
     """Define a named housing scenario from a config dict.
 
-    Required config keys: 'years' (int), 'discount_rate' (float),
-    'condo' dict with 'monthly_fee' (float),
-    'house' dict with 'initial_value' (float).
+    Required config keys: 'years' (int), 'discount_rate' (float), and at least one
+    option section: 'condo' (with 'monthly_fee'), 'house' (with 'initial_value'),
+    or 'rent' (with 'monthly_rent').
 
-    Optional: 'economic', 'simulation' sections — see examples/basic_config.yaml.
-    Returns {name, status, condo_monthly_fee, house_initial_value, years} or {error}.
+    Optional: 'income' (with 'annual_income') for affordability, plus 'economic'
+    and 'simulation' sections — see examples/basic_config.yaml.
+    Returns {name, status, years, discount_rate, and per-option summaries for any
+    section present} or {error}.
     """
     return define_scenario(name, config)
 
@@ -53,10 +55,12 @@ def sweep_param_tool(name: str, param_path: str, values: list[float]) -> dict:
     years, discount_rate,
     condo.monthly_fee, condo.fee_escalation_rate, condo.reserve_contribution_rate,
     house.initial_value, house.value_growth_rate, house.annual_maintenance_rate,
+    rent.monthly_rent, rent.invested_down_payment, rent.investment_return_rate,
     simulation.house_maintenance_vol, simulation.condo_fee_vol,
     economic.inflation_rate.
 
-    Returns {name, param_path, rows: [{value, condo_pv_total, house_pv_total, diff_pv}]}.
+    Returns {name, param_path, rows: [{value, and condo_total_pv / house_total_pv /
+    rent_total_pv for each option present in the scenario}]}.
     """
     return sweep_param(name, param_path, values)
 

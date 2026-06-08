@@ -44,7 +44,7 @@ def test_full_chain(tmp_path, monkeypatch):
     # Sweep condo fee
     r3 = sweep_param("smoke", "condo.monthly_fee", [400.0, 500.0, 600.0])
     assert len(r3["rows"]) == 3
-    fees = [row["condo_pv_total"] for row in r3["rows"]]
+    fees = [row["condo_total_pv"] for row in r3["rows"]]
     assert fees[0] < fees[1] < fees[2]
 
     # Save figure
@@ -75,8 +75,10 @@ def test_two_scenario_session(tmp_path, monkeypatch):
     run_comparison("cheap_condo", mode="deterministic")
     run_comparison("expensive_condo", mode="deterministic")
 
-    cheap_diff = registry.get("cheap_condo").det_result.diff_pv
-    expensive_diff = registry.get("expensive_condo").det_result.diff_pv
+    cheap_det = registry.get("cheap_condo").det_result
+    expensive_det = registry.get("expensive_condo").det_result
+    cheap_diff = cheap_det.house.total_pv - cheap_det.condo.total_pv
+    expensive_diff = expensive_det.house.total_pv - expensive_det.condo.total_pv
 
-    # Cheaper condo fee → higher diff_pv (house is relatively more expensive vs cheaper condo)
+    # Cheaper condo fee → higher diff (house is relatively more expensive vs cheaper condo)
     assert cheap_diff > expensive_diff

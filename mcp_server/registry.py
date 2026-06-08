@@ -1,22 +1,28 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from hde.models import DeterministicResult, MonteCarloResult
+from typing import Optional
+
+from hde.models import (
+    ComparisonSpec,
+    ComparisonDeterministicResult,
+    ComparisonMonteCarloResult,
+)
 
 
 @dataclass
 class ScenarioEntry:
     name: str
     raw_config: dict
-    params: tuple  # (CondoParams, HouseParams, SimulationParams, EconomicParams)
-    det_result: DeterministicResult | None = None
-    mc_result: MonteCarloResult | None = None
+    spec: ComparisonSpec
+    det_result: Optional[ComparisonDeterministicResult] = None
+    mc_result: Optional[ComparisonMonteCarloResult] = None
 
 
 _REGISTRY: dict[str, ScenarioEntry] = {}
 
 
-def define(name: str, raw_config: dict, params: tuple) -> None:
-    _REGISTRY[name] = ScenarioEntry(name=name, raw_config=raw_config, params=params)
+def define(name: str, raw_config: dict, spec: ComparisonSpec) -> None:
+    _REGISTRY[name] = ScenarioEntry(name=name, raw_config=raw_config, spec=spec)
 
 
 def get(name: str) -> ScenarioEntry:
@@ -44,8 +50,8 @@ def remove(name: str) -> None:
 
 def store_results(
     name: str,
-    det_result: DeterministicResult | None = None,
-    mc_result: MonteCarloResult | None = None,
+    det_result: Optional[ComparisonDeterministicResult] = None,
+    mc_result: Optional[ComparisonMonteCarloResult] = None,
 ) -> None:
     entry = get(name)
     entry.det_result = det_result

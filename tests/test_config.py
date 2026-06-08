@@ -31,12 +31,12 @@ class TestLoadConfigFromFile:
             config_path = f.name
         
         try:
-            condo, house, sim, econ = load_config(config_path)
-            
-            assert condo.monthly_fee == 400
-            assert house.initial_value == 400000
-            assert sim.years == 20
-            assert sim.discount_rate == 0.03
+            spec = load_config(config_path)
+
+            assert spec.condo.monthly_fee == 400
+            assert spec.house.initial_value == 400000
+            assert spec.simulation.years == 20
+            assert spec.simulation.discount_rate == 0.03
         finally:
             Path(config_path).unlink()
     
@@ -94,24 +94,24 @@ class TestLoadConfigFromFile:
             config_path = f.name
         
         try:
-            condo, house, sim, econ = load_config(config_path)
-            
-            assert condo.monthly_fee == 550
-            assert condo.fee_escalation_rate == 0.02
-            assert len(condo.events) == 1
-            assert condo.events[0].name == "assessment"
-            assert len(condo.other_recurring_costs) == 1
-            
-            assert house.initial_value == 500000
-            assert house.value_growth_rate == 0.02
-            assert len(house.events) == 1
-            
-            assert sim.num_sims == 5000
-            assert sim.random_seed == 123
-            assert sim.house_maintenance_vol == 0.25
-            
-            assert econ.mode == "real"
-            assert econ.inflation_rate == 0.025
+            spec = load_config(config_path)
+
+            assert spec.condo.monthly_fee == 550
+            assert spec.condo.fee_escalation_rate == 0.02
+            assert len(spec.condo.events) == 1
+            assert spec.condo.events[0].name == "assessment"
+            assert len(spec.condo.other_recurring_costs) == 1
+
+            assert spec.house.initial_value == 500000
+            assert spec.house.value_growth_rate == 0.02
+            assert len(spec.house.events) == 1
+
+            assert spec.simulation.num_sims == 5000
+            assert spec.simulation.random_seed == 123
+            assert spec.simulation.house_maintenance_vol == 0.25
+
+            assert spec.economic.mode == "real"
+            assert spec.economic.inflation_rate == 0.025
         finally:
             Path(config_path).unlink()
     
@@ -133,11 +133,11 @@ class TestLoadConfigDict:
             "house": {"initial_value": 400000},
         }
         
-        condo, house, sim, econ = load_config_dict(config)
-        
-        assert condo.monthly_fee == 400
-        assert house.initial_value == 400000
-    
+        spec = load_config_dict(config)
+
+        assert spec.condo.monthly_fee == 400
+        assert spec.house.initial_value == 400000
+
     def test_defaults_applied(self):
         """Test that default values are applied."""
         config = {
@@ -146,16 +146,16 @@ class TestLoadConfigDict:
             "condo": {"monthly_fee": 400},
             "house": {"initial_value": 400000},
         }
-        
-        condo, house, sim, econ = load_config_dict(config)
-        
+
+        spec = load_config_dict(config)
+
         # Check defaults
-        assert condo.fee_escalation_rate == 0.0
-        assert house.value_growth_rate == 0.0
-        assert house.annual_maintenance_rate == 0.0
-        assert sim.num_sims == 10000
-        assert sim.random_seed == 42
-        assert econ.mode == "real"
+        assert spec.condo.fee_escalation_rate == 0.0
+        assert spec.house.value_growth_rate == 0.0
+        assert spec.house.annual_maintenance_rate == 0.0
+        assert spec.simulation.num_sims == 10000
+        assert spec.simulation.random_seed == 42
+        assert spec.economic.mode == "real"
 
 
 class TestValidation:
@@ -184,26 +184,26 @@ class TestValidation:
             load_config_dict(config)
     
     def test_missing_condo(self):
-        """Test that missing condo section raises error."""
+        """Test that a house-only config (no condo) is now valid."""
         config = {
             "years": 20,
             "discount_rate": 0.03,
             "house": {"initial_value": 400000},
         }
-        
-        with pytest.raises(ConfigValidationError, match="condo"):
-            load_config_dict(config)
-    
+        spec = load_config_dict(config)
+        assert spec.condo is None
+        assert spec.house.initial_value == 400000
+
     def test_missing_house(self):
-        """Test that missing house section raises error."""
+        """Test that a condo-only config (no house) is now valid."""
         config = {
             "years": 20,
             "discount_rate": 0.03,
             "condo": {"monthly_fee": 400},
         }
-        
-        with pytest.raises(ConfigValidationError, match="house"):
-            load_config_dict(config)
+        spec = load_config_dict(config)
+        assert spec.house is None
+        assert spec.condo.monthly_fee == 400
     
     def test_invalid_years(self):
         """Test that invalid years raises error."""
@@ -268,9 +268,9 @@ class TestEventParsing:
             },
         }
         
-        _, house, _, _ = load_config_dict(config)
-        
-        event = house.events[0]
+        spec = load_config_dict(config)
+
+        event = spec.house.events[0]
         assert event.name == "roof"
         assert event.base_cost == 15000
         assert event.expected_year == 20
@@ -278,7 +278,7 @@ class TestEventParsing:
         assert event.min_year == 15
         assert event.max_year == 25
         assert event.cost_vol == 0.25
-    
+
     def test_event_with_defaults(self):
         """Test parsing event with only required fields."""
         config = {
@@ -296,10 +296,10 @@ class TestEventParsing:
                 ],
             },
         }
-        
-        _, house, _, _ = load_config_dict(config)
-        
-        event = house.events[0]
+
+        spec = load_config_dict(config)
+
+        event = spec.house.events[0]
         assert event.timing_std_years == 0.0
         assert event.min_year == 1
         assert event.max_year is None
@@ -326,13 +326,13 @@ class TestEventParsing:
                 ],
             },
         }
-        
-        condo, house, _, _ = load_config_dict(config)
-        
-        assert condo.reserve_contribution_rate == 0.1
-        assert condo.reserve_initial_balance == 1000
-        assert condo.reserve_growth_rate == 0.02
-        assert house.maintenance_curve == [(1, 0.01), (10, 0.02)]
+
+        spec = load_config_dict(config)
+
+        assert spec.condo.reserve_contribution_rate == 0.1
+        assert spec.condo.reserve_initial_balance == 1000
+        assert spec.condo.reserve_growth_rate == 0.02
+        assert spec.house.maintenance_curve == [(1, 0.01), (10, 0.02)]
     
     def test_event_missing_required_field(self):
         """Test that event missing required field raises error."""
@@ -377,9 +377,9 @@ class TestRecurringCostParsing:
             "house": {"initial_value": 400000},
         }
         
-        condo, _, _, _ = load_config_dict(config)
-        
-        cost = condo.other_recurring_costs[0]
+        spec = load_config_dict(config)
+
+        cost = spec.condo.other_recurring_costs[0]
         assert cost.name == "insurance"
         assert cost.annual_amount == 1000
         assert cost.escalation_rate == 0.02
@@ -401,7 +401,94 @@ class TestRecurringCostParsing:
             "house": {"initial_value": 400000},
         }
         
-        condo, _, _, _ = load_config_dict(config)
-        
-        cost = condo.other_recurring_costs[0]
+        spec = load_config_dict(config)
+
+        cost = spec.condo.other_recurring_costs[0]
         assert cost.escalation_rate == 0.0
+
+
+class TestComparisonSpecReturn:
+    """load_config_dict returns ComparisonSpec."""
+
+    def test_load_returns_comparison_spec(self):
+        from hde.models import ComparisonSpec
+        config = {
+            "years": 10, "discount_rate": 0.05,
+            "condo": {"monthly_fee": 500},
+            "house": {"initial_value": 300_000},
+        }
+        spec = load_config_dict(config)
+        assert isinstance(spec, ComparisonSpec)
+        assert spec.condo.monthly_fee == 500
+        assert spec.house.initial_value == 300_000
+        assert spec.simulation.years == 10
+        assert spec.economic.mode == "real"
+
+    def test_load_rent_only_config(self):
+        from hde.models import ComparisonSpec
+        config = {
+            "years": 10, "discount_rate": 0.05,
+            "rent": {"monthly_rent": 2000},
+        }
+        spec = load_config_dict(config)
+        assert isinstance(spec, ComparisonSpec)
+        assert spec.rent.monthly_rent == 2000
+        assert spec.condo is None
+        assert spec.house is None
+
+    def test_all_none_options_raises(self):
+        config = {"years": 10, "discount_rate": 0.05}
+        with pytest.raises(ConfigValidationError):
+            load_config_dict(config)
+
+    def test_rent_params_parsed_correctly(self):
+        config = {
+            "years": 10, "discount_rate": 0.05,
+            "rent": {
+                "monthly_rent": 2500,
+                "rent_escalation_rate": 0.04,
+                "invested_down_payment": 100_000,
+                "investment_return_rate": 0.07,
+            },
+        }
+        spec = load_config_dict(config)
+        assert spec.rent.monthly_rent == 2500
+        assert spec.rent.rent_escalation_rate == 0.04
+        assert spec.rent.invested_down_payment == 100_000
+        assert spec.rent.investment_return_rate == 0.07
+
+    def test_income_params_parsed_correctly(self):
+        config = {
+            "years": 10, "discount_rate": 0.05,
+            "condo": {"monthly_fee": 500},
+            "income": {
+                "annual_income": 120_000,
+                "income_growth_rate": 0.03,
+                "affordability_threshold": 0.35,
+                "pay_drop_events": [
+                    {"year": 3, "magnitude": 0.8}
+                ],
+            },
+        }
+        spec = load_config_dict(config)
+        assert spec.income.annual_income == 120_000
+        assert len(spec.income.pay_drop_events) == 1
+        assert spec.income.pay_drop_events[0].year == 3
+        assert spec.income.pay_drop_events[0].magnitude == 0.8
+
+    def test_rent_validation_invalid_monthly_rent(self):
+        config = {
+            "years": 10, "discount_rate": 0.05,
+            "rent": {"monthly_rent": -100},
+        }
+        with pytest.raises(ConfigValidationError):
+            load_config_dict(config)
+
+    def test_income_validation_invalid_threshold(self):
+        config = {
+            "years": 10, "discount_rate": 0.05,
+            "condo": {"monthly_fee": 500},
+            "income": {"annual_income": 100_000, "affordability_threshold": 1.5},
+        }
+        with pytest.raises(ConfigValidationError):
+            load_config_dict(config)
