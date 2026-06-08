@@ -106,6 +106,7 @@ def _parse_recurring_cost(cost_data: Dict[str, Any]) -> RecurringOtherCost:
 
 
 def _parse_pay_drop_event(data: Dict[str, Any]) -> PayDropEvent:
+    """Parse a PayDropEvent from YAML data."""
     if "year" not in data:
         raise ConfigValidationError("pay_drop_event missing required field: year")
     if "magnitude" not in data:
@@ -182,6 +183,7 @@ def _parse_house(house_data: Dict[str, Any], years: int) -> HouseParams:
 
 
 def _parse_rent(data: Dict[str, Any], years: int) -> RentParams:
+    """Parse RentParams from YAML data."""
     if "monthly_rent" not in data:
         raise ConfigValidationError("rent section missing required field: monthly_rent")
     events = [_parse_event(e, years) for e in data.get("events", [])]
@@ -197,6 +199,7 @@ def _parse_rent(data: Dict[str, Any], years: int) -> RentParams:
 
 
 def _parse_income(data: Dict[str, Any]) -> IncomeParams:
+    """Parse IncomeParams from YAML data."""
     if "annual_income" not in data:
         raise ConfigValidationError("income section missing required field: annual_income")
     events = [_parse_pay_drop_event(e) for e in data.get("pay_drop_events", [])]
@@ -342,20 +345,20 @@ def validate_config(spec: ComparisonSpec) -> List[str]:
     if spec.rent is not None:
         rent = spec.rent
         if rent.monthly_rent <= 0:
-            warnings.append("rent.monthly_rent must be positive")
+            warnings.append(f"rent.monthly_rent must be positive, got {rent.monthly_rent}")
         if not (0 < rent.rent_escalation_rate < 0.20):
-            warnings.append("rent.rent_escalation_rate must be between 0 and 0.20")
+            warnings.append(f"rent.rent_escalation_rate must be between 0 and 0.20, got {rent.rent_escalation_rate}")
         if rent.invested_down_payment < 0:
-            warnings.append("rent.invested_down_payment must be non-negative")
+            warnings.append(f"rent.invested_down_payment must be non-negative, got {rent.invested_down_payment}")
         if not (0 < rent.investment_return_rate < 0.25):
-            warnings.append("rent.investment_return_rate must be between 0 and 0.25")
+            warnings.append(f"rent.investment_return_rate must be between 0 and 0.25, got {rent.investment_return_rate}")
 
     if spec.income is not None:
         income = spec.income
         if income.annual_income <= 0:
-            warnings.append("income.annual_income must be positive")
+            warnings.append(f"income.annual_income must be positive, got {income.annual_income}")
         if not (0 < income.affordability_threshold < 1):
-            warnings.append("income.affordability_threshold must be between 0 and 1")
+            warnings.append(f"income.affordability_threshold must be between 0 and 1, got {income.affordability_threshold}")
         for event in income.pay_drop_events:
             if not (0 < event.magnitude <= 1):
                 warnings.append(f"pay_drop_event year={event.year}: magnitude must be in (0, 1]")
