@@ -2,7 +2,7 @@
 
 ## Status
 
-**Overall:** In progress (S2 complete)
+**Overall:** In progress (S3 complete)
 **Created:** 2026-06-07
 **Last Updated:** 2026-06-08
 **Slug:** `housing-decision-engine`
@@ -13,7 +13,7 @@
 | --- | --- | --- | --- | --- |
 | 1 | decisive | `completed` | `/home/mm-mike/ai_system/projects/housing-decision-engine` — commit `daf9503` | Rename + uv + AGENTS.md/CLAUDE.md + docs structure |
 | 2 | brainstorm-to-execute | `completed` | `/home/mm-mike/ai_system/projects/housing-decision-engine/mcp_server/` — PR #2 commit `79b3a56` | 6 MCP tools, 115 tests, FastMCP stdio |
-| 3 | brainstorm-to-execute | `not_started` | (will be produced by S3) | Rent option + employment cash flow model |
+| 3 | brainstorm-to-execute | `completed` | `docs/plans/archive/2026-06/2026-06-08-rent-income-model.md` — PR #3 commit `6121f1a` | ComparisonSpec refactor, RentParams + PV, IncomeParams + AffordabilityReport, 151 tests |
 | 4 | brainstorm-to-execute | `not_started` | (will be produced by S4) | Market scenario layer + Monte Carlo extensions |
 
 Status values: `not_started`, `in_progress`, `blocked`, `completed`.
@@ -21,16 +21,17 @@ A `completed` row MUST carry a real, stat-able **absolute** artifact path.
 
 ### Hand-off Payload
 
-- **Next session:** Session 3
+- **Next session:** Session 4
 - **Session type:** brainstorm-to-execute
-- **Next engine skill to invoke:** `mm-spine:brainstorming` — rent model + employment cash flow design
+- **Next engine skill to invoke:** `mm-spine:brainstorming` — market scenario layer design
 - **Input artifacts it consumes:**
-  - `/home/mm-mike/ai_system/projects/housing-decision-engine/src/hde/` — engine (deterministic + MC + config)
-  - `/home/mm-mike/ai_system/projects/housing-decision-engine/mcp_server/` — MCP server (6 tools live)
-  - `/home/mm-mike/ai_system/projects/housing-decision-engine/docs/specs/archive/2026-06/2026-06-07-mcp-server-design.md` — S2 spec (reference)
-- **Session objective:** Design + implement rent as a first-class third option alongside condo/house (RentParams, PV calculations, MC extension), plus employment cash flow model (income trajectory, pay-drop events). Extend MCP tools to expose 3-way comparison and income scenario modeling.
-- **Key open questions for S3 brainstorm:** (1) Does opportunity cost of down payment belong in the rent model? (2) Is income modeled as a cost-comparison adjustment or an affordability overlay?
-- **Mid-session resume state:** N/A (S3 not started)
+  - `/home/mm-mike/ai_system/projects/housing-decision-engine/src/hde/` — engine (ComparisonSpec, 3-way det + MC, AffordabilityReport)
+  - `/home/mm-mike/ai_system/projects/housing-decision-engine/mcp_server/` — MCP server (6 tools, inline affordability)
+  - `/home/mm-mike/ai_system/projects/housing-decision-engine/docs/specs/archive/2026-06/2026-06-08-rent-income-model-design.md` — S3 spec
+- **Session objective:** Design + implement market scenario layer: real estate price-drop events (year + magnitude + recovery), interest rate shocks, correlated market + income shocks in MC. Add `sensitivity_sweep` and `stress_test` MCP tools. Pre-canned scenario configs (market crash, rate spike, pay cut).
+- **Key open questions for S4 brainstorm:** (1) How are market shocks correlated with income shocks in MC? (2) What distribution for price-drop recovery? (3) Which pre-canned scenarios are most useful?
+- **S3 deferred items (carry into S4 design):** nominal-mode affordability cash-flow consistency; affordability MC using per-sim housing costs (not deterministic); rent event z_inf correlation; crisis event model (forced-sell on sustained income shock).
+- **Mid-session resume state:** N/A (S4 not started)
 
 ### Decisions / Deviations
 

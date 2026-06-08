@@ -17,18 +17,18 @@ Personal financial tooling (own use). Not fund money-path — no VRP, no equity 
 
 ```
 src/hde/            # Core engine (Python package)
-  models.py         # Dataclasses: params + results
+  models.py         # Dataclasses: params + results (incl. ComparisonSpec, RentParams, IncomeParams)
   pv.py             # Pure PV utility functions
-  deterministic.py  # Deterministic PV engine
-  monte_carlo.py    # Monte Carlo simulation engine
-  config.py         # YAML config loader
+  deterministic.py  # Deterministic PV engine (compute_deterministic(spec: ComparisonSpec))
+  monte_carlo.py    # Monte Carlo simulation engine (run_monte_carlo(spec: ComparisonSpec))
+  config.py         # YAML config loader (load_config_dict → ComparisonSpec)
   reporting.py      # Text reports + matplotlib figures
   cli.py            # CLI entry point (hde)
 mcp_server/         # MCP server (FastMCP, stdio transport)
   main.py           # FastMCP entry point + @mcp.tool wrappers
-  registry.py       # In-memory ScenarioEntry store (_REGISTRY dict)
+  registry.py       # In-memory ScenarioEntry store (spec: ComparisonSpec)
   tools.py          # 6 tool implementations + serialization helpers
-tests/              # pytest suite
+tests/              # pytest suite (151 tests)
 examples/           # Example YAML scenario configs
 docs/
   roadmaps/         # Roadmap spines (do not edit arc spine)
@@ -62,15 +62,19 @@ uv run hde examples/basic_config.yaml
 
 ## Key design decisions (stable)
 
-- **Deterministic + Monte Carlo** run as separate engines; deterministic is
-  the sanity check, MC is the uncertainty surface.
-- **YAML config** is the input contract — scenarios are files, not code.
+- **ComparisonSpec** is the single input bundle for all engines — replaces the old `(condo, house, sim, econ)` 4-tuple. All options (condo, house, rent, income) are Optional; at least one of condo/house/rent must be present.
+- **3-way comparison** — rent, condo, house are all first-class options. Rent PV includes `invested_dp_benefit_pv = dp × (1+r_inv)^N / (1+dr)^N` (negative, reduces total cost).
+- **Affordability layer** — `IncomeParams` + `PayDropEvent` produce per-year housing-cost/income ratios returned inline in `run_comparison` as `"affordability"` key.
+- **Deterministic + Monte Carlo** run as separate engines; deterministic is the sanity check, MC is the uncertainty surface.
+- **YAML config** is the input contract — scenarios are files, not code. `load_config_dict` returns `ComparisonSpec`.
 - **Pure functions** throughout — no global state, seeded RNG for reproducibility.
 - **MCP tools** wrap the existing engine; no engine logic in the MCP layer.
-- **Session registry** (`registry.py`) is in-process, process-scoped — cleared on server restart.
-- **MC numpy arrays** never cross the MCP boundary; only `MonteCarloSummary` scalars returned.
+- **Session registry** (`registry.py`) is in-process, process-scoped — cleared on server restart. Stores `spec: ComparisonSpec` (not a 4-tuple).
+- **MC numpy arrays** never cross the MCP boundary; only `MonteCarloSummary` scalars + `prob_X_cheapest` returned.
 - **store_results** uses total-replace semantics — running deterministic-only clears cached MC results.
 - **Scenario names** are sanitized via `Path(name).name` before joining figure paths.
+- **sweep_param** whitelist has 14 paths; rent paths require `spec.rent is not None`.
+- **Breakdown keys** centralized as `CONDO_BREAKDOWN_KEYS`, `HOUSE_BREAKDOWN_KEYS`, `RENT_BREAKDOWN_KEYS` frozensets.
 
 ## Roadmap
 
@@ -79,7 +83,7 @@ Active roadmap: `docs/roadmaps/2026-06-07_housing-decision-engine.md`
 Sessions:
 - S1 ✅ Repo foundation (2026-06-07, PR #2)
 - S2 ✅ MCP server — 6 tools, 115 tests (2026-06-08, PR #2)
-- S3 Rent option + employment cash flow model
+- S3 ✅ 3-way comparison + income model — 151 tests (2026-06-08, PR #3)
 - S4 Market scenario layer + Monte Carlo extensions
 
 ## Do not
