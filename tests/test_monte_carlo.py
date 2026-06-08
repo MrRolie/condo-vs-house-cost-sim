@@ -11,9 +11,15 @@ from hde.models import (
     EconomicParams,
     EventConfig,
     RecurringOtherCost,
+    ComparisonSpec,
 )
 from hde.deterministic import compute_deterministic
 from hde.monte_carlo import run_monte_carlo
+
+
+def _ch_spec(condo, house, sim, econ):
+    """Wrap a condo/house pair into a ComparisonSpec (migration helper)."""
+    return ComparisonSpec(simulation=sim, economic=econ, condo=condo, house=house)
 
 
 class TestMonteCarloBasics:
@@ -26,23 +32,11 @@ class TestMonteCarloBasics:
         sim = SimulationParams(years=20, discount_rate=0.03, num_sims=1000)
         econ = EconomicParams()
         
-        result = run_monte_carlo(condo, house, sim, econ)
-        
-        assert result.condo_pv.shape == (1000,)
-        assert result.house_pv.shape == (1000,)
-        assert result.diff_pv.shape == (1000,)
-    
-    def test_diff_equals_house_minus_condo(self):
-        """Test that diff_pv equals house_pv - condo_pv."""
-        condo = CondoParams(monthly_fee=400)
-        house = HouseParams(initial_value=400_000, annual_maintenance_rate=0.015)
-        sim = SimulationParams(years=20, discount_rate=0.03, num_sims=100)
-        econ = EconomicParams()
-        
-        result = run_monte_carlo(condo, house, sim, econ)
-        
-        expected_diff = result.house_pv - result.condo_pv
-        np.testing.assert_array_almost_equal(result.diff_pv, expected_diff)
+        result = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
+        assert result.condo.pvs.shape == (1000,)
+        assert result.house.pvs.shape == (1000,)
+        assert (result.house.pvs - result.condo.pvs).shape == (1000,)
     
     def test_reproducibility_with_seed(self):
         """Test that same seed produces same results."""
@@ -51,11 +45,11 @@ class TestMonteCarloBasics:
         sim = SimulationParams(years=20, discount_rate=0.03, num_sims=100, random_seed=42)
         econ = EconomicParams()
         
-        result1 = run_monte_carlo(condo, house, sim, econ)
-        result2 = run_monte_carlo(condo, house, sim, econ)
-        
-        np.testing.assert_array_equal(result1.condo_pv, result2.condo_pv)
-        np.testing.assert_array_equal(result1.house_pv, result2.house_pv)
+        result1 = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+        result2 = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
+        np.testing.assert_array_equal(result1.condo.pvs, result2.condo.pvs)
+        np.testing.assert_array_equal(result1.house.pvs, result2.house.pvs)
     
     def test_different_seeds_produce_different_results(self):
         """Test that different seeds produce different results."""
@@ -73,10 +67,10 @@ class TestMonteCarloBasics:
         sim2 = SimulationParams(years=20, discount_rate=0.03, num_sims=100, random_seed=123)
         econ = EconomicParams()
         
-        result1 = run_monte_carlo(condo, house, sim1, econ)
-        result2 = run_monte_carlo(condo, house, sim2, econ)
-        
-        assert not np.array_equal(result1.condo_pv, result2.condo_pv)
+        result1 = run_monte_carlo(_ch_spec(condo, house, sim1, econ))
+        result2 = run_monte_carlo(_ch_spec(condo, house, sim2, econ))
+
+        assert not np.array_equal(result1.condo.pvs, result2.condo.pvs)
 
 
 class TestMonteCarloDeterministicConvergence:
@@ -100,15 +94,16 @@ class TestMonteCarloDeterministicConvergence:
         )
         econ = EconomicParams()
         
-        det_result = compute_deterministic(condo, house, sim, econ)
-        mc_result = run_monte_carlo(condo, house, sim, econ)
-        
+        spec = _ch_spec(condo, house, sim, econ)
+        det_result = compute_deterministic(spec)
+        mc_result = run_monte_carlo(spec)
+
         # With zero volatility (and no events), MC should exactly equal deterministic
         # All simulations should be identical
-        assert abs(mc_result.condo_summary.mean - det_result.condo_pv_total) < 1.0
-        assert abs(mc_result.house_summary.mean - det_result.house_pv_total) < 1.0
-        assert mc_result.condo_summary.std < 1.0  # Should be essentially zero
-        assert mc_result.house_summary.std < 1.0
+        assert abs(mc_result.condo.summary.mean - det_result.condo.total_pv) < 1.0
+        assert abs(mc_result.house.summary.mean - det_result.house.total_pv) < 1.0
+        assert mc_result.condo.summary.std < 1.0  # Should be essentially zero
+        assert mc_result.house.summary.std < 1.0
 
 
 class TestMonteCarloVolatility:
@@ -129,10 +124,10 @@ class TestMonteCarloVolatility:
             house_maintenance_vol=0.40, random_seed=42
         )
         
-        result_low = run_monte_carlo(condo, house, sim_low, econ)
-        result_high = run_monte_carlo(condo, house, sim_high, econ)
-        
-        assert result_high.house_summary.std > result_low.house_summary.std
+        result_low = run_monte_carlo(_ch_spec(condo, house, sim_low, econ))
+        result_high = run_monte_carlo(_ch_spec(condo, house, sim_high, econ))
+
+        assert result_high.house.summary.std > result_low.house.summary.std
     
     def test_volatility_affects_spread(self):
         """Test that volatility affects the 5th-95th percentile spread."""
@@ -149,11 +144,11 @@ class TestMonteCarloVolatility:
             house_maintenance_vol=0.40, random_seed=42
         )
         
-        result_low = run_monte_carlo(condo, house, sim_low, econ)
-        result_high = run_monte_carlo(condo, house, sim_high, econ)
-        
-        spread_low = result_low.house_summary.p95 - result_low.house_summary.p5
-        spread_high = result_high.house_summary.p95 - result_high.house_summary.p5
+        result_low = run_monte_carlo(_ch_spec(condo, house, sim_low, econ))
+        result_high = run_monte_carlo(_ch_spec(condo, house, sim_high, econ))
+
+        spread_low = result_low.house.summary.p95 - result_low.house.summary.p5
+        spread_high = result_high.house.summary.p95 - result_high.house.summary.p5
         
         assert spread_high > spread_low
 
@@ -168,9 +163,9 @@ class TestMonteCarloProbability:
         sim = SimulationParams(years=20, discount_rate=0.03, num_sims=1000)
         econ = EconomicParams()
         
-        result = run_monte_carlo(condo, house, sim, econ)
-        
-        assert 0.0 <= result.prob_house_more_expensive <= 1.0
+        result = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
+        assert 0.0 <= result.prob_condo_cheapest <= 1.0
     
     def test_identical_costs_prob_around_half(self):
         """Test that similar costs give probability around 50%."""
@@ -190,11 +185,11 @@ class TestMonteCarloProbability:
         )
         econ = EconomicParams()
         
-        result = run_monte_carlo(condo, house, sim, econ)
-        
+        result = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
         # With similar costs and volatility, probability should be around 50%
         # Allow wide tolerance due to randomness
-        assert 0.3 < result.prob_house_more_expensive < 0.7
+        assert abs(result.prob_condo_cheapest - 0.5) < 0.15
     
     def test_clearly_higher_house_cost_gives_high_prob(self):
         """Test that clearly higher house costs give high probability."""
@@ -209,10 +204,10 @@ class TestMonteCarloProbability:
         )
         econ = EconomicParams()
         
-        result = run_monte_carlo(condo, house, sim, econ)
-        
-        # House is clearly more expensive
-        assert result.prob_house_more_expensive > 0.95
+        result = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
+        # House is clearly more expensive -> condo is cheapest almost always
+        assert result.prob_condo_cheapest > 0.90
 
 
 class TestMonteCarloSummary:
@@ -228,12 +223,12 @@ class TestMonteCarloSummary:
         )
         econ = EconomicParams()
         
-        result = run_monte_carlo(condo, house, sim, econ)
-        
+        result = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
         # Check house summary matches array
-        assert abs(result.house_summary.mean - np.mean(result.house_pv)) < 0.01
-        assert abs(result.house_summary.std - np.std(result.house_pv)) < 0.01
-        assert abs(result.house_summary.p50 - np.median(result.house_pv)) < 0.01
+        assert abs(result.house.summary.mean - np.mean(result.house.pvs)) < 0.01
+        assert abs(result.house.summary.std - np.std(result.house.pvs)) < 0.01
+        assert abs(result.house.summary.p50 - np.median(result.house.pvs)) < 0.01
     
     def test_percentiles_ordered(self):
         """Test that percentiles are properly ordered."""
@@ -245,9 +240,9 @@ class TestMonteCarloSummary:
         )
         econ = EconomicParams()
         
-        result = run_monte_carlo(condo, house, sim, econ)
-        
-        assert result.house_summary.p5 <= result.house_summary.p50 <= result.house_summary.p95
+        result = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
+        assert result.house.summary.p5 <= result.house.summary.p50 <= result.house.summary.p95
 
 
 class TestMonteCarloEventTiming:
@@ -269,10 +264,10 @@ class TestMonteCarloEventTiming:
         econ = EconomicParams()
         
         # Run simulation - if event went outside bounds, PV would be invalid
-        result = run_monte_carlo(condo, house, sim, econ)
-        
+        result = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
         # All PVs should be positive (event cost is positive)
-        assert np.all(result.house_pv > 0)
+        assert np.all(result.house.pvs > 0)
     
     def test_no_timing_jitter_produces_deterministic_timing(self):
         """Test that zero timing_std_years produces deterministic timing."""
@@ -288,10 +283,10 @@ class TestMonteCarloEventTiming:
         sim = SimulationParams(years=25, discount_rate=0.03, num_sims=100)
         econ = EconomicParams()
         
-        result = run_monte_carlo(condo, house, sim, econ)
-        
+        result = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
         # All PVs should be identical
-        assert result.house_summary.std < 0.01
+        assert result.house.summary.std < 0.01
 
 
 class TestMonteCarloAdvancedDynamics:
@@ -313,10 +308,10 @@ class TestMonteCarloAdvancedDynamics:
             other_cost_vol=0.40,
         )
         
-        low = run_monte_carlo(condo, house, sim_low, econ)
-        high = run_monte_carlo(condo, house, sim_high, econ)
-        
-        assert high.condo_summary.std > low.condo_summary.std
+        low = run_monte_carlo(_ch_spec(condo, house, sim_low, econ))
+        high = run_monte_carlo(_ch_spec(condo, house, sim_high, econ))
+
+        assert high.condo.summary.std > low.condo.summary.std
     
     def test_hazard_event_can_be_skipped(self):
         """Hazard timing with zero hazard should result in no event costs."""
@@ -333,10 +328,10 @@ class TestMonteCarloAdvancedDynamics:
         sim = SimulationParams(years=10, discount_rate=0.03, num_sims=500)
         econ = EconomicParams()
         
-        result = run_monte_carlo(condo, house, sim, econ)
-        
+        result = run_monte_carlo(_ch_spec(condo, house, sim, econ))
+
         # With zero hazard, events never fire so PV should be ~0
-        assert result.house_summary.mean < 1.0
+        assert result.house.summary.mean < 1.0
     
     def test_reserves_reduce_expected_event_costs(self):
         """Reserve funding should lower expected PV of condo events."""
@@ -353,7 +348,103 @@ class TestMonteCarloAdvancedDynamics:
         sim = SimulationParams(years=5, discount_rate=0.03, num_sims=500, random_seed=123)
         econ = EconomicParams()
         
-        no_reserve = run_monte_carlo(condo_no_reserve, house, sim, econ)
-        with_reserve = run_monte_carlo(condo_with_reserve, house, sim, econ)
-        
-        assert with_reserve.condo_summary.mean < no_reserve.condo_summary.mean
+        no_reserve = run_monte_carlo(_ch_spec(condo_no_reserve, house, sim, econ))
+        with_reserve = run_monte_carlo(_ch_spec(condo_with_reserve, house, sim, econ))
+
+        assert with_reserve.condo.summary.mean < no_reserve.condo.summary.mean
+
+
+from hde.models import (
+    ComparisonSpec, RentParams, IncomeParams, PayDropEvent,
+    ComparisonMonteCarloResult, CondoParams, HouseParams,
+    SimulationParams, EconomicParams,
+)
+
+
+def _spec(condo=None, house=None, rent=None, income=None, years=10, dr=0.05, num_sims=500, seed=42):
+    return ComparisonSpec(
+        simulation=SimulationParams(years=years, discount_rate=dr, num_sims=num_sims, random_seed=seed),
+        economic=EconomicParams(),
+        condo=condo, house=house, rent=rent, income=income,
+    )
+
+
+class TestRentMC:
+    def test_rent_mc_output_shape(self):
+        rent = RentParams(monthly_rent=2000.0, rent_escalation_rate=0.02)
+        spec = _spec(rent=rent, num_sims=200)
+        result = run_monte_carlo(spec)
+        assert result.rent is not None
+        assert result.rent.pvs.shape == (200,)
+
+    def test_rent_mc_zero_vol_converges_to_deterministic(self):
+        """With zero vol, MC mean ≈ deterministic PV (within 1%)."""
+        from hde.deterministic import compute_deterministic
+        rent = RentParams(monthly_rent=2000.0, rent_escalation_rate=0.0, invested_down_payment=0.0)
+        spec = _spec(rent=rent, num_sims=1000)
+        mc = run_monte_carlo(spec)
+        det = compute_deterministic(spec)
+        assert abs(mc.rent.summary.mean - det.rent.total_pv) / det.rent.total_pv < 0.01
+
+    def test_rent_mc_zero_vol_nominal_mode_matches_deterministic(self):
+        """Nominal-mode escalation parity: MC rent folds in inflation like the
+        deterministic model, so zero-vol MC mean still tracks deterministic PV."""
+        from hde.deterministic import compute_deterministic
+        rent = RentParams(monthly_rent=2000.0, rent_escalation_rate=0.02, invested_down_payment=0.0)
+        spec = ComparisonSpec(
+            simulation=SimulationParams(years=10, discount_rate=0.05, num_sims=1000, random_seed=42),
+            economic=EconomicParams(mode="nominal", inflation_rate=0.03),
+            rent=rent,
+        )
+        mc = run_monte_carlo(spec)
+        det = compute_deterministic(spec)
+        assert abs(mc.rent.summary.mean - det.rent.total_pv) / det.rent.total_pv < 0.01
+
+
+class TestRankingProbs:
+    def test_prob_cheapest_sums_to_one(self):
+        """All three options: ranking probs sum to 1.0."""
+        condo = CondoParams(monthly_fee=800.0)
+        house = HouseParams(initial_value=400_000.0, value_growth_rate=0.0, annual_maintenance_rate=0.01)
+        rent = RentParams(monthly_rent=2000.0)
+        spec = _spec(condo=condo, house=house, rent=rent, num_sims=500)
+        result = run_monte_carlo(spec)
+        assert result.prob_rent_cheapest is not None
+        assert result.prob_condo_cheapest is not None
+        assert result.prob_house_cheapest is not None
+        total = result.prob_rent_cheapest + result.prob_condo_cheapest + result.prob_house_cheapest
+        assert abs(total - 1.0) < 1e-9
+
+    def test_prob_cheapest_none_when_single_option(self):
+        rent = RentParams(monthly_rent=2000.0)
+        spec = _spec(rent=rent, num_sims=100)
+        result = run_monte_carlo(spec)
+        assert result.prob_rent_cheapest is None
+        assert result.prob_condo_cheapest is None
+        assert result.prob_house_cheapest is None
+
+    def test_prob_cheapest_two_options_sums_to_one(self):
+        condo = CondoParams(monthly_fee=600.0)
+        house = HouseParams(initial_value=400_000.0, value_growth_rate=0.0, annual_maintenance_rate=0.015)
+        spec = _spec(condo=condo, house=house, num_sims=500)
+        result = run_monte_carlo(spec)
+        assert 0.0 <= result.prob_condo_cheapest <= 1.0
+        assert 0.0 <= result.prob_house_cheapest <= 1.0
+        assert abs(result.prob_condo_cheapest + result.prob_house_cheapest - 1.0) < 1e-9
+        assert result.prob_rent_cheapest is None
+
+
+class TestAffordabilityMC:
+    def test_affordability_mc_prob_in_valid_range(self):
+        income = IncomeParams(annual_income=50_000.0, affordability_threshold=0.35)
+        condo = CondoParams(monthly_fee=1000.0)  # 12k/50k=24%, below threshold
+        spec = _spec(condo=condo, income=income, num_sims=200)
+        result = run_monte_carlo(spec)
+        assert result.affordability_mc is not None
+        assert 0.0 <= result.affordability_mc.prob_condo_exceeds <= 1.0
+
+    def test_no_income_no_affordability_mc(self):
+        condo = CondoParams(monthly_fee=500.0)
+        spec = _spec(condo=condo, num_sims=100)
+        result = run_monte_carlo(spec)
+        assert result.affordability_mc is None
