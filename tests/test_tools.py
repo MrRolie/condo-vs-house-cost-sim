@@ -1,6 +1,7 @@
 # tests/test_tools.py
 import copy
 import json
+import os
 import pytest
 import numpy as np
 from hde.config import load_config_dict
@@ -10,7 +11,8 @@ from hde.models import (
     MonteCarloSummary,
 )
 from mcp_server import registry
-from mcp_server.tools import _det_to_dict, _mc_to_dict, define_scenario, run_comparison, sweep_param
+import mcp_server.tools as tools_module
+from mcp_server.tools import _det_to_dict, _mc_to_dict, define_scenario, run_comparison, sweep_param, save_figure
 
 
 @pytest.fixture(autouse=True)
@@ -190,3 +192,46 @@ def test_sweep_paths_resolve_against_live_dataclass_fields():
             load_config_dict(config)
         except Exception as e:
             pytest.fail(f"_SWEEP_PATHS[{path!r}] → invalid config: {e}")
+
+
+# --- save_figure ---
+
+def test_save_figure_requires_mc_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_module, "FIGURE_CACHE_DIR", tmp_path)
+    define_scenario("s1", BASIC_CONFIG)
+    result = save_figure("s1", "diff_distribution")
+    assert "error" in result
+    assert "run_comparison" in result["error"]
+
+
+def test_save_figure_diff_distribution(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_module, "FIGURE_CACHE_DIR", tmp_path)
+    define_scenario("s1", BASIC_CONFIG)
+    run_comparison("s1", mode="monte_carlo")
+    result = save_figure("s1", "diff_distribution")
+    assert "path" in result
+    assert os.path.exists(result["path"])
+    assert result["path"].endswith(".png")
+
+
+def test_save_figure_pv_distributions(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_module, "FIGURE_CACHE_DIR", tmp_path)
+    define_scenario("s1", BASIC_CONFIG)
+    run_comparison("s1", mode="monte_carlo")
+    result = save_figure("s1", "pv_distributions")
+    assert "path" in result
+    assert os.path.exists(result["path"])
+
+
+def test_save_figure_unknown_type(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_module, "FIGURE_CACHE_DIR", tmp_path)
+    define_scenario("s1", BASIC_CONFIG)
+    run_comparison("s1", mode="monte_carlo")
+    result = save_figure("s1", "unknown_type")
+    assert "error" in result
+
+
+def test_save_figure_missing_scenario(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_module, "FIGURE_CACHE_DIR", tmp_path)
+    result = save_figure("nonexistent", "diff_distribution")
+    assert "error" in result

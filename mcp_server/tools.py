@@ -142,3 +142,31 @@ def sweep_param(name: str, param_path: str, values: list) -> dict:
             "diff_pv": det.diff_pv,
         })
     return {"name": name, "param_path": param_path, "rows": rows}
+
+
+def save_figure(name: str, figure_type: str) -> dict:
+    """Save a matplotlib figure for a scenario to the figure cache dir.
+    figure_type: 'diff_distribution' | 'pv_distributions'.
+    Returns {'path': '<absolute_path>'}.
+    Requires run_comparison to have been called with mode='monte_carlo' or 'both' first."""
+    try:
+        entry = registry.get(name)
+    except KeyError:
+        return {"error": f"scenario not found: {name}"}
+    if entry.mc_result is None:
+        return {"error": f"no MC results for scenario {name!r} — run run_comparison first"}
+    if figure_type not in ("diff_distribution", "pv_distributions"):
+        return {"error": f"unknown figure_type {figure_type!r}. Options: diff_distribution, pv_distributions"}
+
+    FIGURE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    ts = int(time.time())
+    path = FIGURE_CACHE_DIR / f"{name}_{figure_type}_{ts}.png"
+
+    if figure_type == "diff_distribution":
+        fig = plot_diff_distribution(entry.mc_result)
+    else:
+        fig = plot_pv_distributions(entry.mc_result)
+
+    fig.savefig(str(path), dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return {"path": str(path)}
