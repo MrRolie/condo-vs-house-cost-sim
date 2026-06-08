@@ -1,0 +1,44 @@
+# 3-way comparison: rent vs condo vs house with invested down payment
+# Illustrates the full economic picture (opportunity cost of down payment included)
+
+years: 15
+discount_rate: 0.05
+
+condo:
+  monthly_fee: 800
+  fee_escalation_rate: 0.03
+  events:
+    - name: "special_assessment"
+      base_cost: 15000
+      expected_year: 8
+      cost_vol: 0.2
+
+house:
+  initial_value: 550000
+  value_growth_rate: 0.03
+  annual_maintenance_rate: 0.012
+  events:
+    - name: "roof_replacement"
+      base_cost: 20000
+      expected_year: 12
+      cost_vol: 0.15
+
+rent:
+  monthly_rent: 2800
+  rent_escalation_rate: 0.04
+  invested_down_payment: 150000
+  investment_return_rate: 0.07
+  events:
+    - name: "moving_costs"
+      base_cost: 4000
+      expected_year: 8
+
+simulation:
+  num_sims: 5000
+  random_seed: 42
+  house_maintenance_vol: 0.15
+  condo_fee_vol: 0.10
+
+economic:
+  mode: real
+  inflation_rate: 0.03
