@@ -64,3 +64,30 @@ def define_scenario(name: str, config: dict) -> dict:
         "house_initial_value": house.initial_value,
         "years": sim.years,
     }
+
+
+def run_comparison(name: str, mode: str = "both") -> dict:
+    """Run deterministic and/or Monte Carlo comparison for a named scenario.
+    mode: 'deterministic' | 'monte_carlo' | 'both'."""
+    try:
+        entry = registry.get(name)
+    except KeyError:
+        return {"error": f"scenario not found: {name}"}
+    condo, house, sim, econ = entry.params
+    det = None
+    mc = None
+    if mode in ("deterministic", "both"):
+        det = compute_deterministic(condo, house, sim, econ)
+    if mode in ("monte_carlo", "both"):
+        mc = run_monte_carlo(condo, house, sim, econ)
+    registry.store_results(name, det_result=det, mc_result=mc)
+    result: dict = {
+        "name": name,
+        "mode": mode,
+        "report": format_text_report(det, mc, sim, econ),
+    }
+    if det is not None:
+        result["deterministic"] = _det_to_dict(det)
+    if mc is not None:
+        result["monte_carlo"] = _mc_to_dict(mc)
+    return result

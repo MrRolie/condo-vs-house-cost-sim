@@ -8,7 +8,7 @@ from hde.models import (
     MonteCarloSummary,
 )
 from mcp_server import registry
-from mcp_server.tools import _det_to_dict, _mc_to_dict, define_scenario
+from mcp_server.tools import _det_to_dict, _mc_to_dict, define_scenario, run_comparison
 
 
 @pytest.fixture(autouse=True)
@@ -84,3 +84,46 @@ def test_define_scenario_invalid_config_returns_error():
     bad = {"years": 20, "discount_rate": 0.03, "condo": {"monthly_fee": -100}, "house": {"initial_value": 400_000}}
     result = define_scenario("bad", bad)
     assert "error" in result
+
+
+# --- run_comparison ---
+
+def test_run_comparison_both_modes():
+    define_scenario("s1", BASIC_CONFIG)
+    result = run_comparison("s1")
+    assert result["name"] == "s1"
+    assert result["mode"] == "both"
+    assert isinstance(result["report"], str)
+    assert len(result["report"]) > 0
+    assert "deterministic" in result
+    assert "monte_carlo" in result
+    assert isinstance(result["deterministic"]["diff_pv"], float)
+    assert 0.0 <= result["monte_carlo"]["prob_house_more_expensive"] <= 1.0
+
+
+def test_run_comparison_deterministic_only():
+    define_scenario("s1", BASIC_CONFIG)
+    result = run_comparison("s1", mode="deterministic")
+    assert "deterministic" in result
+    assert "monte_carlo" not in result
+
+
+def test_run_comparison_mc_only():
+    define_scenario("s1", BASIC_CONFIG)
+    result = run_comparison("s1", mode="monte_carlo")
+    assert "monte_carlo" in result
+    assert "deterministic" not in result
+
+
+def test_run_comparison_stores_results_in_registry():
+    define_scenario("s1", BASIC_CONFIG)
+    run_comparison("s1", mode="both")
+    entry = registry.get("s1")
+    assert entry.det_result is not None
+    assert entry.mc_result is not None
+
+
+def test_run_comparison_missing_scenario():
+    result = run_comparison("nonexistent")
+    assert "error" in result
+    assert "nonexistent" in result["error"]
