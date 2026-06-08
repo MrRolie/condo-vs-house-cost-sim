@@ -53,7 +53,7 @@ uv run hde-mcp                         # stdio transport (Claude Code)
 
 ```bash
 uv sync --extra dev
-uv run python -m pytest            # 76 tests
+uv run python -m pytest
 uv run hde examples/basic_config.yaml
 ```
 
