@@ -29,8 +29,9 @@ The engine should answer two questions simultaneously:
 - New result types: `ComparisonDeterministicResult`, `ComparisonMonteCarloResult`, `MonteCarloOptionResult`, `AffordabilityReport`, `AffordabilityMCReport`
 - `config.py`: `load_config_dict` returns `ComparisonSpec` (breaking — all callers migrate)
 - `SimulationParams`: 2 new MC volatility fields (`rent_escalation_vol`, `investment_return_vol`)
-- MCP: `get_affordability_report` tool (7th tool), updated `ScenarioEntry`, extended `_SWEEP_PATHS`
+- MCP: affordability inline in `run_comparison` return, updated `ScenarioEntry`, extended `_SWEEP_PATHS`
 - All 115 existing tests migrated to `ComparisonSpec` calling convention
+- `src/hde/reporting.py`, `src/hde/cli.py` (quiet-mode), `mcp_server/tools.py` (`sweep_param`) migrated to new result types
 
 ### Out
 - Mortgage modeling / equity tracking (buy-side PV stays as-is)
@@ -54,8 +55,8 @@ Income does not enter the PV comparison score. It generates a parallel `Affordab
 ### D4 — Option C architecture (ComparisonSpec value-object bundle)
 All parameters bundled into `ComparisonSpec`. `compute_deterministic` and `run_monte_carlo` accept `ComparisonSpec` exclusively. Breaking change — trades short-term migration cost for clean S4 extensibility (add `MarketScenarioParams` to `ComparisonSpec` without touching function signatures).
 
-### D5 — `get_affordability_report` as a separate MCP tool
-Keeps `run_comparison` focused on PV computation. Affordability is retrieved with a separate `get_affordability_report` call after `run_comparison`. Follows MCP atomic-tool principle.
+### D5 — Affordability inline in `run_comparison` (revised from initial design)
+Affordability report included as a nullable `"affordability"` key in `run_comparison` return value. It is already-computed data (not a separate operation), so the atomic-tool principle does not apply. One call returns PV results + affordability together when income params are present. No 7th tool added — server stays at 6 tools.
 
 ---
 
@@ -158,8 +159,15 @@ class ComparisonMonteCarloResult:
     condo: MonteCarloOptionResult | None = None
     house: MonteCarloOptionResult | None = None
     rent: MonteCarloOptionResult | None = None
+    # 3-way ranking probabilities (computed from pvs arrays before they're discarded).
+    # Replaces the old prob_house_more_expensive + diff_summary fields.
+    prob_rent_cheapest: float | None = None    # fraction of sims where rent has lowest PV
+    prob_condo_cheapest: float | None = None
+    prob_house_cheapest: float | None = None
     affordability_mc: AffordabilityMCReport | None = None
 ```
+
+**Note on diffs:** `diff_pv` and `diff_summary` (2-way era) are dropped. Claude reads per-option `total_pv` values and computes comparisons directly. Probabilistic ranking (`prob_X_cheapest`) is computed from simulation arrays via `np.argmin([rent_pvs, condo_pvs, house_pvs], axis=0)` before arrays are discarded — cannot be recomputed from summary scalars alone.
 
 `MonteCarloSummary` (existing dataclass with mean/std/p5/p50/p95) is **unchanged**.
 
@@ -266,6 +274,7 @@ income:                             # optional
 - `load_config_dict(d)` return type: `(CondoParams, HouseParams, SimulationParams, EconomicParams)` → **`ComparisonSpec`**
 - `load_config(path)` same return type change
 - `validate_config(spec: ComparisonSpec)` signature updated; adds rent/income range checks
+- **Loader invariant fix:** remove hard-require for `condo` and `house` sections (current lines 330-333 and 365-368). Replace with: raise `ConfigValidationError` if all of `spec.condo`, `spec.house`, `spec.rent` are `None`. Configs with only a `rent` section (e.g., `examples/income_shock.yaml`) must load cleanly.
 
 ### `validate_config` additions
 - `rent.monthly_rent > 0`
@@ -298,10 +307,11 @@ class ScenarioEntry:
 
 ### `mcp_server/tools.py`
 
-- `define_scenario`: calls `load_config_dict(raw)` → `ComparisonSpec`; stores `entry.spec`.
-- `run_comparison`: calls `compute_deterministic(entry.spec)` / `run_monte_carlo(entry.spec)`.
-- `_det_to_dict`: updated for `ComparisonDeterministicResult` (per-option `OptionResult` structure).
-- `_mc_to_dict`: updated for `ComparisonMonteCarloResult` (per-option `MonteCarloOptionResult`). MC numpy arrays still never cross MCP boundary — only `MonteCarloSummary` scalars returned.
+- `define_scenario`: calls `load_config_dict(raw)` → `ComparisonSpec`; stores `entry.spec`. Guard: do NOT unconditionally read `entry.spec.condo.monthly_fee` / `entry.spec.house.initial_value` — check for None first.
+- `run_comparison`: calls `compute_deterministic(entry.spec)` / `run_monte_carlo(entry.spec)`. Return value includes `"affordability"` key (nullable) with the full `AffordabilityReport` / `AffordabilityMCReport` when income params present.
+- `_det_to_dict`: updated for `ComparisonDeterministicResult` (per-option `OptionResult` structure). Per-option breakdown keys centralized as module constants (`CONDO_BREAKDOWN_KEYS`, `HOUSE_BREAKDOWN_KEYS`, `RENT_BREAKDOWN_KEYS`) — drift protection when new breakdown fields are added.
+- `_mc_to_dict`: updated for `ComparisonMonteCarloResult` (per-option `MonteCarloOptionResult` + `prob_X_cheapest` fields). MC numpy arrays still never cross MCP boundary — only `MonteCarloSummary` scalars returned.
+- `save_figure`: add guard for options not present in spec — if `entry.spec.rent is None` and `figure_type == "rent"`, return error rather than raising `AttributeError`.
 - `sweep_param`: guard added — if path starts with `"rent."` and `entry.spec.rent is None`, return `{"error": "scenario has no rent section; cannot sweep rent.* paths"}`.
 
 ### `_SWEEP_PATHS` extension (3 new entries)
@@ -314,59 +324,32 @@ class ScenarioEntry:
 
 Total: 14 whitelisted paths (up from 11). Drift-guard test extended to cover rent paths with a rent-inclusive fixture config.
 
-### New 7th tool: `get_affordability_report`
+### `run_comparison` return shape (with affordability inline)
 
-```python
-class AffordabilityReportInput(BaseModel):
-    name: str = Field(..., description="Scenario name")
-
-@mcp.tool(
-    name="get_affordability_report",
-    annotations={
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    }
-)
-def get_affordability_report_tool(name: str) -> dict:
-    """Retrieve the affordability report for a previously run scenario.
-
-    Returns annual income trajectory, per-option housing-cost/income ratios by year,
-    years exceeding the threshold, and (if MC was run) probability of exceeding the
-    threshold in any year per option.
-
-    Returns an error dict if:
-    - Scenario not found
-    - run_comparison has not been called for this scenario
-    - No income params were defined in the scenario config
-    """
-```
-
-Return shape:
+When `spec.income` is present, `run_comparison` return includes:
 ```json
 {
-  "deterministic": {
+  "condo": {"total_pv": ..., "breakdown": {...}},
+  "house": {"total_pv": ..., "breakdown": {...}},
+  "rent":  {"total_pv": ..., "breakdown": {...}},
+  "prob_rent_cheapest": 0.41,
+  "prob_condo_cheapest": 0.34,
+  "prob_house_cheapest": 0.25,
+  "affordability": {
     "annual_incomes": [...],
     "threshold": 0.35,
-    "rent": {"ratios": [...], "years_exceeding": [...]},
+    "rent":  {"ratios": [...], "years_exceeding": [...]},
     "condo": {"ratios": [...], "years_exceeding": [...]},
     "house": {"ratios": [...], "years_exceeding": [...]}
-  },
-  "monte_carlo": {
-    "threshold": 0.35,
-    "prob_rent_exceeds": 0.12,
-    "prob_condo_exceeds": 0.31,
-    "prob_house_exceeds": 0.27
   }
 }
 ```
 
-Fields are `null` for options not present in the scenario or if MC not yet run.
+All per-option keys are `null` for options not in the scenario. `affordability` is `null` when no income params defined. `prob_X_cheapest` fields are `null` when MC not run or fewer than 2 options present.
 
-### Existing tools: no signature changes
+### Existing tool signatures: unchanged
 
-`define_scenario`, `run_comparison`, `sweep_param`, `save_figure`, `list_scenarios`, `delete_scenario` — tool signatures unchanged. Internal implementations updated for new result types.
+`define_scenario`, `run_comparison`, `sweep_param`, `save_figure`, `list_scenarios`, `delete_scenario` — tool signatures unchanged. Internal implementations updated for new result types. Server stays at **6 tools**.
 
 ---
 
@@ -382,7 +365,12 @@ Migration:
 - `mc_result.condo_pvs` → `mc_result.condo.pvs`
 - `mc_result.condo_summary` → `mc_result.condo.summary`
 
-The migration is mechanical. A single implementer subagent handles all 115 tests + model/config/CLI call sites in one task.
+Migration also covers (not only tests):
+- `src/hde/reporting.py` — `format_text_report` and `plot_*` functions reference `DeterministicResult` / `MonteCarloResult` fields; update to `ComparisonDeterministicResult` / `ComparisonMonteCarloResult`
+- `src/hde/cli.py` — quiet-mode summary logic reads `result.condo_total_pv` / `result.house_total_pv`; update to `result.condo.total_pv` etc.
+- `mcp_server/tools.py` — `_det_to_dict`, `_mc_to_dict`, `sweep_param` all reference old result shape
+
+A single implementer subagent handles all 115 tests + all above call sites in one task (mechanical search-and-replace pattern).
 
 ---
 
@@ -399,6 +387,10 @@ The migration is mechanical. A single implementer subagent handles all 115 tests
 - `test_comparison_spec_requires_at_least_one_option` — `ComparisonSpec` with all None options raises `ConfigValidationError`
 - `test_sweep_param_rent_path_no_rent_section` — guard returns error dict when spec has no rent
 - `test_drift_guard_sweep_paths_rent` — all 3 new `_SWEEP_PATHS` entries resolve against rent-inclusive fixture
+- `test_load_config_rent_only` — YAML with only `rent` section (no condo/house) loads without error; `spec.condo` and `spec.house` are `None`
+- `test_load_config_all_none_raises` — YAML with no condo/house/rent section raises `ConfigValidationError`
+- `test_prob_cheapest_sums_to_one` — `prob_rent_cheapest + prob_condo_cheapest + prob_house_cheapest ≈ 1.0` (within float tolerance) when all three options present
+- `test_prob_cheapest_none_when_single_option` — `prob_X_cheapest` all `None` when only one option present
 
 ---
 
@@ -410,15 +402,16 @@ No external boundary claims in this spec. All computation is in-process pure Pyt
 
 ## MCP Tool Summary (post-S3)
 
-| Tool | Purpose | Breaking change? |
+Server stays at **6 tools** — no new tool added.
+
+| Tool | Purpose | What changes |
 |---|---|---|
-| `define_scenario` | validate + store `ComparisonSpec` | internal only |
-| `run_comparison` | run det/MC, store results | return shape updated |
-| `sweep_param` | parameter sensitivity | +3 rent paths, guard added |
-| `save_figure` | render MC figures | unchanged |
+| `define_scenario` | validate + store `ComparisonSpec` | internal: None-safe option guards |
+| `run_comparison` | run det/MC, store results | return shape updated; `affordability` + `prob_X_cheapest` added |
+| `sweep_param` | parameter sensitivity | +3 rent paths; rent-section guard added; migrated to new result types |
+| `save_figure` | render MC figures | guard for absent options |
 | `list_scenarios` | registry management | unchanged |
 | `delete_scenario` | registry management | unchanged |
-| `get_affordability_report` | **NEW** — income ratios + MC affordability | — |
 
 ---
 
