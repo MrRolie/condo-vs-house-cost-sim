@@ -1,36 +1,25 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
-name = "cvh-cost"
-version = "0.1.0"
-description = "Condo vs House cost analysis engine with deterministic and Monte Carlo simulations"
+name = "housing-decision-engine"
+version = "0.2.0"
+description = "Housing decision engine: rent / condo / house PV comparison with income and market scenario analysis"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     {name = "Contributors"}
 ]
-keywords = ["finance", "real-estate", "cost-analysis", "monte-carlo", "present-value"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Intended Audience :: Financial and Insurance Industry",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Office/Business :: Financial",
-]
+keywords = ["finance", "real-estate", "housing", "cost-analysis", "monte-carlo", "present-value", "mcp"]
 
 dependencies = [
     "numpy>=1.20.0",
     "pyyaml>=6.0",
     "matplotlib>=3.5.0",
     "pandas>=1.3.0",
+    "fastmcp>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -41,17 +30,17 @@ dev = [
 ]
 
 [project.scripts]
-cvh-cost = "cvh_cost.cli:main"
+hde = "hde.cli:main"
+hde-mcp = "mcp_server.main:run"
 
 [project.urls]
-Homepage = "https://github.com/example/condo-vs-house-cost-sim"
-Repository = "https://github.com/example/condo-vs-house-cost-sim"
+Repository = "https://github.com/mm-mike/housing-decision-engine"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/hde", "mcp_server"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

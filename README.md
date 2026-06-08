@@ -1,74 +1,67 @@
-# Condo vs House Cost Simulator
+# Housing Decision Engine
 
-A Python tool for comparing the long-run present value of ownership costs between condos and houses using deterministic and Monte Carlo analysis.
+Present value comparison engine for housing decisions — rent vs condo vs house —
+with employment cash flow modeling, real estate market scenario analysis,
+and an MCP server so Claude can run comparisons directly.
 
 ## Features
 
-- **Deterministic PV Analysis**: Calculate present value of ownership costs with fixed parameters
-- **Monte Carlo Simulation**: Model uncertainty in costs and timing with configurable volatility
-- **Economic Coherence**: Real/nominal handling with inflation-driven escalation and correlated shocks
-- **Flexible Configuration**: YAML-based configuration for easy scenario definition
-- **Library & CLI**: Use as a Python library or via command-line interface
-- **Jupyter Notebooks**: Interactive exploration with provided notebooks
+- **3-way PV comparison** — rent / condo / house (rent coming in S3)
+- **Deterministic + Monte Carlo** — fixed-parameter estimate + full uncertainty distribution
+- **Employment cash flow** — model income trajectories and pay-drop events (S3)
+- **Market scenario analysis** — real estate price shocks, rate sensitivity (S4)
+- **MCP server** — Claude-callable tools, no notebooks required (S2)
+- **CLI** — `hde` command for standalone use
+- **YAML scenarios** — config files for reproducible comparisons
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/example/condo-vs-house-cost-sim.git
-cd condo-vs-house-cost-sim
-
-# Install in development mode
-pip install -e .
-
-# Install with dev dependencies
-pip install -e ".[dev]"
+git clone <repo>
+cd housing-decision-engine
+uv sync --extra dev
 ```
 
 ## Quick Start
 
-### As a Library
+```bash
+# Run a scenario
+uv run hde examples/basic_config.yaml
+
+# Deterministic only
+uv run hde examples/basic_config.yaml --no-monte-carlo
+
+# Summary line only
+uv run hde examples/basic_config.yaml --quiet
+```
+
+## MCP Server
+
+*Coming in Session 2.* Claude will be able to call housing comparison tools
+directly via MCP — no YAML file required.
+
+## As a Library
 
 ```python
-from cvh_cost.models import CondoParams, HouseParams, SimulationParams, EconomicParams, EventConfig
-from cvh_cost.deterministic import compute_deterministic
-from cvh_cost.monte_carlo import run_monte_carlo
+from hde.models import CondoParams, HouseParams, SimulationParams, EconomicParams
+from hde.deterministic import compute_deterministic
+from hde.monte_carlo import run_monte_carlo
 
-# Define parameters
 condo = CondoParams(monthly_fee=400, fee_escalation_rate=0.02)
-house = HouseParams(
-    initial_value=400_000,
-    annual_maintenance_rate=0.015,
-    events=[EventConfig(name="roof", base_cost=12000, expected_year=15)]
-)
+house = HouseParams(initial_value=400_000, annual_maintenance_rate=0.015)
 sim = SimulationParams(years=20, discount_rate=0.03)
 econ = EconomicParams()
 
-# Run analysis
-det_result = compute_deterministic(condo, house, sim, econ)
-mc_result = run_monte_carlo(condo, house, sim, econ)
+det = compute_deterministic(condo, house, sim, econ)
+mc = run_monte_carlo(condo, house, sim, econ)
 
-print(f"Deterministic difference: ${det_result.diff_pv:,.0f}")
-print(f"P(House more expensive): {mc_result.prob_house_more_expensive:.1%}")
+print(f"Deterministic difference: ${det.diff_pv:,.0f}")
+print(f"P(House more expensive): {mc.prob_house_more_expensive:.1%}")
 ```
-
-### Via CLI
-
-```bash
-# Run with a config file
-python -m cvh_cost.cli examples/basic_config.yaml
-
-# Deterministic only
-python -m cvh_cost.cli examples/basic_config.yaml --no-monte-carlo
-```
-
-### Via Notebooks
-
-See `notebooks/basic_usage.ipynb` for a guided introduction and `notebooks/advanced_usage.ipynb` for advanced scenarios.
 
 ## Configuration
 
-Configuration is done via YAML files. See `examples/` for sample configs.
+YAML scenario files. See `examples/` for templates.
 
 ```yaml
 years: 20
@@ -77,7 +70,6 @@ discount_rate: 0.03
 condo:
   monthly_fee: 400
   fee_escalation_rate: 0.02
-  events: []
 
 house:
   initial_value: 400000
@@ -98,53 +90,34 @@ simulation:
 
 ## Project Structure
 
-```text
-condo-vs-house-cost-sim/
-├── pyproject.toml          # Package configuration
-├── README.md
-├── LICENSE
-├── src/
-│   └── cvh_cost/           # Main package
-│       ├── models.py       # Dataclasses for parameters and results
-│       ├── pv.py           # Present value calculation utilities
-│       ├── deterministic.py # Deterministic PV calculations
-│       ├── monte_carlo.py  # Monte Carlo simulation
-│       ├── config.py       # YAML config loading
-│       ├── reporting.py    # Text reports and plotting
-│       └── cli.py          # Command-line interface
-├── notebooks/              # Jupyter notebooks
-├── examples/               # Example YAML configs
-├── tests/                  # Test suite
-└── context/                # Documentation for developers
+```
+src/hde/            # Core engine
+  models.py         # Dataclasses: params + results
+  pv.py             # PV utility functions
+  deterministic.py  # Deterministic engine
+  monte_carlo.py    # Monte Carlo engine
+  config.py         # YAML config loader
+  reporting.py      # Reports + plots
+  cli.py            # CLI entry point
+mcp_server/         # MCP server (S2 — coming)
+examples/           # Scenario YAML files
+tests/              # Test suite (76 tests)
+docs/
+  roadmaps/         # Project roadmaps
+  specs/            # Session design docs
+  reference/        # Architecture + API docs
 ```
 
-## Running Tests
+## Tests
 
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=cvh_cost
-
-# Type checking
-mypy src
+uv run python -m pytest
 ```
 
-## Scope and Non-Goals
+## Roadmap
 
-This tool focuses **strictly on ownership cost analysis**:
-
-✅ Present value of condo fees and house maintenance  
-✅ One-time events (roof, HVAC, special assessments)  
-✅ Monte Carlo uncertainty modeling  
-✅ Configurable scenarios via YAML  
-
-❌ Rent vs buy analysis  
-❌ Investment returns or opportunity cost  
-❌ Geographic tax rules  
-❌ Leverage or mortgage optimization  
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
+See `docs/roadmaps/2026-06-07_housing-decision-engine.md` for the full arc:
+- S1 ✅ Repo foundation (rename, uv, AGENTS.md, CLAUDE.md)
+- S2 MCP server
+- S3 Rent option + employment cash flow
+- S4 Market scenario layer

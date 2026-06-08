@@ -3,7 +3,7 @@ Tests for deterministic calculations.
 """
 
 import pytest
-from cvh_cost.models import (
+from hde.models import (
     CondoParams,
     HouseParams,
     SimulationParams,
@@ -11,8 +11,8 @@ from cvh_cost.models import (
     EventConfig,
     RecurringOtherCost,
 )
-from cvh_cost.deterministic import compute_deterministic
-from cvh_cost.pv import pv_annuity, pv_growth_annuity, pv_single
+from hde.deterministic import compute_deterministic
+from hde.pv import pv_annuity, pv_growth_annuity, pv_single
 
 
 class TestCondoDeterministic:
