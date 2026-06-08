@@ -24,7 +24,10 @@ src/hde/            # Core engine (Python package)
   config.py         # YAML config loader
   reporting.py      # Text reports + matplotlib figures
   cli.py            # CLI entry point (hde)
-mcp_server/         # MCP server (S2 — not yet built)
+mcp_server/         # MCP server (FastMCP, stdio transport)
+  main.py           # FastMCP entry point + @mcp.tool wrappers
+  registry.py       # In-memory ScenarioEntry store (_REGISTRY dict)
+  tools.py          # 6 tool implementations + serialization helpers
 tests/              # pytest suite
 examples/           # Example YAML scenario configs
 docs/
@@ -63,15 +66,19 @@ uv run hde examples/basic_config.yaml
   the sanity check, MC is the uncertainty surface.
 - **YAML config** is the input contract — scenarios are files, not code.
 - **Pure functions** throughout — no global state, seeded RNG for reproducibility.
-- **MCP tools** (S2) wrap the existing engine; no engine logic in the MCP layer.
+- **MCP tools** wrap the existing engine; no engine logic in the MCP layer.
+- **Session registry** (`registry.py`) is in-process, process-scoped — cleared on server restart.
+- **MC numpy arrays** never cross the MCP boundary; only `MonteCarloSummary` scalars returned.
+- **store_results** uses total-replace semantics — running deterministic-only clears cached MC results.
+- **Scenario names** are sanitized via `Path(name).name` before joining figure paths.
 
 ## Roadmap
 
 Active roadmap: `docs/roadmaps/2026-06-07_housing-decision-engine.md`
 
 Sessions:
-- S1 ✅ Repo foundation (this session)
-- S2 MCP server (agent-native layer)
+- S1 ✅ Repo foundation (2026-06-07, PR #2)
+- S2 ✅ MCP server — 6 tools, 115 tests (2026-06-08, PR #2)
 - S3 Rent option + employment cash flow model
 - S4 Market scenario layer + Monte Carlo extensions
 

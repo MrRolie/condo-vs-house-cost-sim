@@ -2,9 +2,9 @@
 
 ## Status
 
-**Overall:** In progress (S1 complete)
+**Overall:** In progress (S2 complete)
 **Created:** 2026-06-07
-**Last Updated:** 2026-06-07
+**Last Updated:** 2026-06-08
 **Slug:** `housing-decision-engine`
 
 ### Session Status
@@ -12,7 +12,7 @@
 | Session | Type | Status | Artifact path(s) (resume contract) | Notes |
 | --- | --- | --- | --- | --- |
 | 1 | decisive | `completed` | `/home/mm-mike/ai_system/projects/housing-decision-engine` — commit `daf9503` | Rename + uv + AGENTS.md/CLAUDE.md + docs structure |
-| 2 | brainstorm-to-execute | `not_started` | (will be produced by S2) | MCP server — agent-native layer |
+| 2 | brainstorm-to-execute | `completed` | `/home/mm-mike/ai_system/projects/housing-decision-engine/mcp_server/` — PR #2 commit `79b3a56` | 6 MCP tools, 115 tests, FastMCP stdio |
 | 3 | brainstorm-to-execute | `not_started` | (will be produced by S3) | Rent option + employment cash flow model |
 | 4 | brainstorm-to-execute | `not_started` | (will be produced by S4) | Market scenario layer + Monte Carlo extensions |
 
@@ -21,15 +21,16 @@ A `completed` row MUST carry a real, stat-able **absolute** artifact path.
 
 ### Hand-off Payload
 
-- **Next session:** Session 2
+- **Next session:** Session 3
 - **Session type:** brainstorm-to-execute
-- **Next engine skill to invoke:** `mm-spine:brainstorming` — MCP server design
+- **Next engine skill to invoke:** `mm-spine:brainstorming` — rent model + employment cash flow design
 - **Input artifacts it consumes:**
-  - `/home/mm-mike/ai_system/projects/housing-decision-engine/src/hde/` — engine package (renamed, uv-managed)
-  - `/home/mm-mike/ai_system/projects/housing-decision-engine/docs/reference/` — architecture + API contract docs
-  - `/home/mm-mike/ai_system/projects/housing-decision-engine/examples/` — example YAML configs
-- **Session objective:** Design and build the MCP server (`mcp_server/`). Brainstorm: tool granularity, input/output contracts, FastMCP pattern (ref actuarial-system). Implement: wrap existing deterministic + MC engine as MCP tools. Claude should be able to call `compare_housing` and get a structured result by end of session.
-- **Mid-session resume state:** N/A (S2 not started)
+  - `/home/mm-mike/ai_system/projects/housing-decision-engine/src/hde/` — engine (deterministic + MC + config)
+  - `/home/mm-mike/ai_system/projects/housing-decision-engine/mcp_server/` — MCP server (6 tools live)
+  - `/home/mm-mike/ai_system/projects/housing-decision-engine/docs/specs/archive/2026-06/2026-06-07-mcp-server-design.md` — S2 spec (reference)
+- **Session objective:** Design + implement rent as a first-class third option alongside condo/house (RentParams, PV calculations, MC extension), plus employment cash flow model (income trajectory, pay-drop events). Extend MCP tools to expose 3-way comparison and income scenario modeling.
+- **Key open questions for S3 brainstorm:** (1) Does opportunity cost of down payment belong in the rent model? (2) Is income modeled as a cost-comparison adjustment or an affordability overlay?
+- **Mid-session resume state:** N/A (S3 not started)
 
 ### Decisions / Deviations
 
@@ -37,6 +38,7 @@ A `completed` row MUST carry a real, stat-able **absolute** artifact path.
 - **2026-06-07:** New repo/package name: `housing-decision-engine` (dir) / `hde` (Python package slug). Operator chose `hde` over `housing_decision_engine`.
 - **2026-06-07:** Scope expanded beyond original cost-sim to include employment cash flow modeling and real estate market scenario/sensitivity analysis — making this a personal financial scenario engine, not just a cost comparator.
 - **2026-06-07 (S1 complete):** `src/cvh_cost/` → `src/hde/`, setuptools → hatchling, entry point `cvh-cost` → `hde`, Python floor bumped 3.9→3.10. 76 tests pass; `uv.lock` committed.
+- **2026-06-08 (S2 complete):** FastMCP server with 6 tools (define_scenario, run_comparison, sweep_param, save_figure, list_scenarios, delete_scenario). Session registry with total-replace store_results semantics. 11 PR review findings addressed (path traversal, stale MC, mode validation, backend import order). 115 tests pass. PR #2 merged.
 
 ### Next Recommended Action
 
