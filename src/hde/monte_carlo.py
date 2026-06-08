@@ -21,7 +21,6 @@ from .models import (
     EconomicParams,
     EventConfig,
     RecurringOtherCost,
-    MonteCarloResult,
     MonteCarloSummary,
     ComparisonSpec,
     ComparisonMonteCarloResult,
