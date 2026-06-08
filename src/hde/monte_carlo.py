@@ -411,17 +411,24 @@ def _compute_income_affordability_once(
     """
     threshold = income.affordability_threshold
 
+    # Pre-draw jittered years for each pay-drop event (once per sim path).
+    # Drawing inside the year loop would allow a single event to fire in
+    # multiple years or be missed entirely within one simulation path.
+    event_years: dict = {}
+    for event in income.pay_drop_events:
+        if event.year_jitter_std > 0:
+            ev_year = max(1, min(sim.years, round(event.year + rng.normal(0, event.year_jitter_std))))
+        else:
+            ev_year = event.year
+        event_years[id(event)] = ev_year
+
     # One stochastic income trajectory, shared across options.
     traj: List[float] = []
     inc = income.annual_income
     for t in range(sim.years):
         year = t + 1
         for event in income.pay_drop_events:
-            if event.year_jitter_std > 0:
-                ev_year = max(1, round(event.year + rng.normal(0, event.year_jitter_std)))
-            else:
-                ev_year = event.year
-            if ev_year == year:
+            if event_years[id(event)] == year:
                 if event.magnitude_vol > 0:
                     mag = event.magnitude * float(np.exp(rng.normal(0, event.magnitude_vol)))
                     mag = min(max(mag, 0.01), 1.0)

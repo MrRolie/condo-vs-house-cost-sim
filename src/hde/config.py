@@ -234,6 +234,8 @@ def _parse_simulation(sim_data: Optional[Dict[str, Any]], years: int, discount_r
         corr_inflation_other=float(sim_data.get("corr_inflation_other", 0.0)),
         corr_inflation_event_cost=float(sim_data.get("corr_inflation_event_cost", 0.0)),
         shock_model=shock_model,  # type: ignore
+        rent_escalation_vol=float(sim_data.get("rent_escalation_vol", 0.0)),
+        investment_return_vol=float(sim_data.get("investment_return_vol", 0.0)),
     )
 
 
@@ -346,12 +348,12 @@ def validate_config(spec: ComparisonSpec) -> List[str]:
         rent = spec.rent
         if rent.monthly_rent <= 0:
             warnings.append(f"rent.monthly_rent must be positive, got {rent.monthly_rent}")
-        if not (0 < rent.rent_escalation_rate < 0.20):
-            warnings.append(f"rent.rent_escalation_rate must be between 0 and 0.20, got {rent.rent_escalation_rate}")
+        if not (0 <= rent.rent_escalation_rate < 0.20):
+            warnings.append(f"rent.rent_escalation_rate must be between 0 and 0.20 (inclusive), got {rent.rent_escalation_rate}")
         if rent.invested_down_payment < 0:
             warnings.append(f"rent.invested_down_payment must be non-negative, got {rent.invested_down_payment}")
-        if not (0 < rent.investment_return_rate < 0.25):
-            warnings.append(f"rent.investment_return_rate must be between 0 and 0.25, got {rent.investment_return_rate}")
+        if not (0 <= rent.investment_return_rate < 0.25):
+            warnings.append(f"rent.investment_return_rate must be between 0 and 0.25 (inclusive), got {rent.investment_return_rate}")
 
     if spec.income is not None:
         income = spec.income

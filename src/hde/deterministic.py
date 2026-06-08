@@ -396,7 +396,11 @@ def _annual_costs_for_option(
                 ev.base_cost for ev in params.events
                 if _event_year_deterministic(ev, sim.years) == year
             )
-            costs.append(base + ev_cost)
+            other_cost = sum(
+                c.annual_amount * ((1 + c.escalation_rate) ** t)
+                for c in params.other_recurring_costs
+            )
+            costs.append(base + ev_cost + other_cost)
         elif option_type == "house":
             house_val = params.initial_value * ((1 + params.value_growth_rate) ** t)
             maint_rate = _maintenance_rate_for_year(params, year)
@@ -404,14 +408,22 @@ def _annual_costs_for_option(
                 ev.base_cost for ev in params.events
                 if _event_year_deterministic(ev, sim.years) == year
             )
-            costs.append(house_val * maint_rate + ev_cost)
+            other_cost = sum(
+                c.annual_amount * ((1 + c.escalation_rate) ** t)
+                for c in params.other_recurring_costs
+            )
+            costs.append(house_val * maint_rate + ev_cost + other_cost)
         elif option_type == "rent":
             base = params.monthly_rent * 12 * ((1 + params.rent_escalation_rate) ** t)
             ev_cost = sum(
                 ev.base_cost for ev in params.events
                 if _event_year_deterministic(ev, sim.years) == year
             )
-            costs.append(base + ev_cost)
+            other_cost = sum(
+                c.annual_amount * ((1 + c.escalation_rate) ** t)
+                for c in params.other_recurring_costs
+            )
+            costs.append(base + ev_cost + other_cost)
     return costs
 
 
