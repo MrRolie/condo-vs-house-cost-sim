@@ -43,8 +43,10 @@ uv run hde <config.yaml> [--no-monte-carlo] [--quiet]
 # Tests
 uv run python -m pytest
 
-# MCP server (after S2)
-uv run python -m mcp_server.main   # placeholder — update when built
+# MCP server
+uv run hde-mcp                         # stdio transport (Claude Code)
+# Register with Claude Code:
+# claude mcp add hde -- uv --directory /home/mm-mike/ai_system/projects/housing-decision-engine run hde-mcp
 ```
 
 ## Development setup
