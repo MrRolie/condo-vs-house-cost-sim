@@ -5,226 +5,223 @@ This module provides functions for generating text reports and
 plots from the analysis results.
 """
 
-from typing import Optional
+from typing import Dict, Optional
 
 import numpy as np
+import numpy.typing as npt
 import matplotlib.pyplot as plt
 import matplotlib.figure
+from matplotlib.figure import Figure
 
-from .models import DeterministicResult, MonteCarloResult, SimulationParams, EconomicParams
+from .models import (
+    ComparisonDeterministicResult,
+    ComparisonMonteCarloResult,
+    AffordabilityReport,
+    OptionResult,
+    SimulationParams,
+    EconomicParams,
+)
 from .pv import pv_to_monthly_savings
 
 
 def format_text_report(
-    det: Optional[DeterministicResult],
-    mc: Optional[MonteCarloResult],
+    det: ComparisonDeterministicResult,
+    mc: Optional[ComparisonMonteCarloResult],
     sim: SimulationParams,
-    econ: Optional[EconomicParams] = None,
+    econ: EconomicParams,
 ) -> str:
     """
     Generate a formatted text report of the analysis results.
-    
+
     Args:
-        det: Deterministic results (can be None if not computed)
-        mc: Monte Carlo results (can be None if not computed)
+        det: Deterministic comparison results
+        mc: Monte Carlo comparison results (optional)
         sim: Simulation parameters
-    
+        econ: Economic parameters
+
     Returns:
         Formatted string report
     """
     lines = []
-    lines.append("=" * 60)
-    lines.append("CONDO VS HOUSE OWNERSHIP COST ANALYSIS")
-    lines.append("=" * 60)
-    lines.append("")
-    lines.append(f"Analysis horizon: {sim.years} years")
-    lines.append(f"Discount rate: {sim.discount_rate:.2%}")
-    if econ is not None:
-        lines.append(f"Economic mode: {econ.mode} | inflation: {econ.inflation_rate:.2%} | inflation vol: {getattr(econ, 'inflation_vol', 0.0):.2%}")
-    lines.append("")
-    lines.append("Note: All values are Present Value (PV) of ownership costs.")
-    lines.append("      Higher PV = more expensive over the analysis period.")
-    lines.append("")
-    
-    if det is not None:
-        # Calculate monthly savings needed
-        condo_monthly = pv_to_monthly_savings(det.condo_pv_total, sim.discount_rate, sim.years)
-        house_monthly = pv_to_monthly_savings(det.house_pv_total, sim.discount_rate, sim.years)
-        diff_monthly = pv_to_monthly_savings(abs(det.diff_pv), sim.discount_rate, sim.years)
-        
-        lines.append("-" * 40)
-        lines.append("DETERMINISTIC RESULTS")
-        lines.append("-" * 40)
-        lines.append("")
-        lines.append("Condo Ownership Costs (PV):")
-        lines.append(f"  Monthly fees:     ${det.condo_pv_base:>12,.0f}")
-        lines.append(f"  One-time events:  ${det.condo_pv_events:>12,.0f}")
-        lines.append(f"  Other recurring:  ${det.condo_pv_other:>12,.0f}")
-        lines.append(f"  TOTAL PV:         ${det.condo_pv_total:>12,.0f}")
-        lines.append(f"  -> Equivalent monthly savings: ${condo_monthly:>8,.0f}/mo")
-        lines.append("")
-        lines.append("House Ownership Costs (PV):")
-        lines.append(f"  Maintenance:      ${det.house_pv_base:>12,.0f}")
-        lines.append(f"  One-time events:  ${det.house_pv_events:>12,.0f}")
-        lines.append(f"  Other recurring:  ${det.house_pv_other:>12,.0f}")
-        lines.append(f"  TOTAL PV:         ${det.house_pv_total:>12,.0f}")
-        lines.append(f"  -> Equivalent monthly savings: ${house_monthly:>8,.0f}/mo")
-        lines.append("")
-        lines.append(f"Cost Difference (House - Condo): ${det.diff_pv:>12,.0f}")
-        if det.diff_pv > 0:
-            lines.append(f"  -> House costs ${det.diff_pv:,.0f} more (PV)")
-            lines.append(f"  -> You'd need ~${diff_monthly:,.0f}/mo extra savings for house")
-        elif det.diff_pv < 0:
-            lines.append(f"  -> Condo costs ${-det.diff_pv:,.0f} more (PV)")
-            lines.append(f"  -> You'd need ~${diff_monthly:,.0f}/mo extra savings for condo")
-        else:
-            lines.append("  -> Costs are equal")
-        lines.append("")
-    
+
+    # Per-option PV totals
+    if det.condo is not None:
+        lines.append(f"Condo  total PV:  ${det.condo.total_pv:>12,.0f}")
+        for k, v in det.condo.breakdown.items():
+            lines.append(f"  {k}: ${v:>12,.0f}")
+    if det.house is not None:
+        lines.append(f"House  total PV:  ${det.house.total_pv:>12,.0f}")
+        for k, v in det.house.breakdown.items():
+            lines.append(f"  {k}: ${v:>12,.0f}")
+    if det.rent is not None:
+        lines.append(f"Rent   total PV:  ${det.rent.total_pv:>12,.0f}")
+        for k, v in det.rent.breakdown.items():
+            lines.append(f"  {k}: ${v:>12,.0f}")
+
+    # Comparison line
+    present_det = [
+        (name, r)
+        for name, r in [("Condo", det.condo), ("House", det.house), ("Rent", det.rent)]
+        if r is not None
+    ]
+    if len(present_det) >= 2:
+        cheapest = min(present_det, key=lambda x: x[1].total_pv)
+        costliest = max(present_det, key=lambda x: x[1].total_pv)
+        diff = costliest[1].total_pv - cheapest[1].total_pv
+        lines.append(f"\nCheapest: {cheapest[0]} saves ${diff:,.0f} vs {costliest[0]}")
+        # Monthly equivalent (using pv_to_monthly_savings if discount_rate > 0)
+        if sim.discount_rate > 0 and sim.years > 0:
+            monthly = pv_to_monthly_savings(diff, sim.discount_rate, sim.years)
+            lines.append(f"  ≈ ${monthly:,.0f}/month equivalent")
+
+    # Affordability
+    if det.income_report is not None:
+        rpt = det.income_report
+        lines.append(f"\nAffordability (threshold: {rpt.threshold:.0%})")
+        for name, ratios, exceeds in [
+            ("Rent",  rpt.rent_ratios,  rpt.years_rent_exceeds),
+            ("Condo", rpt.condo_ratios, rpt.years_condo_exceeds),
+            ("House", rpt.house_ratios, rpt.years_house_exceeds),
+        ]:
+            if ratios is not None:
+                max_ratio = max(ratios)
+                exceed_str = str(exceeds) if exceeds else "none"
+                lines.append(f"  {name}: max ratio {max_ratio:.1%}  years exceeding: {exceed_str}")
+
+    # MC summary
     if mc is not None:
-        # Calculate monthly savings for MC results
-        condo_monthly_mc = pv_to_monthly_savings(mc.condo_summary.mean, sim.discount_rate, sim.years)
-        house_monthly_mc = pv_to_monthly_savings(mc.house_summary.mean, sim.discount_rate, sim.years)
-        diff_monthly_mc = pv_to_monthly_savings(abs(mc.diff_summary.mean), sim.discount_rate, sim.years)
-        
-        lines.append("-" * 40)
-        lines.append("MONTE CARLO RESULTS")
-        lines.append("-" * 40)
-        lines.append(f"Simulations: {sim.num_sims:,}")
-        lines.append("")
-        
-        lines.append("Condo Ownership Costs (PV Distribution):")
-        lines.append(f"  Mean:      ${mc.condo_summary.mean:>12,.0f}  (~${condo_monthly_mc:,.0f}/mo)")
-        lines.append(f"  Std Dev:   ${mc.condo_summary.std:>12,.0f}")
-        lines.append(f"  5th %:     ${mc.condo_summary.p5:>12,.0f}")
-        lines.append(f"  Median:    ${mc.condo_summary.p50:>12,.0f}")
-        lines.append(f"  95th %:    ${mc.condo_summary.p95:>12,.0f}")
-        lines.append("")
-        
-        lines.append("House Ownership Costs (PV Distribution):")
-        lines.append(f"  Mean:      ${mc.house_summary.mean:>12,.0f}  (~${house_monthly_mc:,.0f}/mo)")
-        lines.append(f"  Std Dev:   ${mc.house_summary.std:>12,.0f}")
-        lines.append(f"  5th %:     ${mc.house_summary.p5:>12,.0f}")
-        lines.append(f"  Median:    ${mc.house_summary.p50:>12,.0f}")
-        lines.append(f"  95th %:    ${mc.house_summary.p95:>12,.0f}")
-        lines.append("")
-        
-        lines.append("Cost Difference Distribution (House - Condo):")
-        lines.append(f"  Mean:      ${mc.diff_summary.mean:>12,.0f}  (~${diff_monthly_mc:,.0f}/mo diff)")
-        lines.append(f"  Std Dev:   ${mc.diff_summary.std:>12,.0f}")
-        lines.append(f"  5th %:     ${mc.diff_summary.p5:>12,.0f}")
-        lines.append(f"  Median:    ${mc.diff_summary.p50:>12,.0f}")
-        lines.append(f"  95th %:    ${mc.diff_summary.p95:>12,.0f}")
-        lines.append("")
-        
-        lines.append(f"Probability (House costs more): {mc.prob_house_more_expensive:.1%}")
-        lines.append("")
-    
-    lines.append("=" * 60)
-    
+        lines.append("\nMonte Carlo:")
+        for name, opt in [("Condo", mc.condo), ("House", mc.house), ("Rent", mc.rent)]:
+            if opt is not None:
+                s = opt.summary
+                lines.append(
+                    f"  {name}: mean ${s.mean:,.0f}  p5 ${s.p5:,.0f}"
+                    f"  p50 ${s.p50:,.0f}  p95 ${s.p95:,.0f}"
+                )
+        probs = [
+            (name, prob)
+            for name, prob in [
+                ("P(condo cheapest)", mc.prob_condo_cheapest),
+                ("P(house cheapest)", mc.prob_house_cheapest),
+                ("P(rent cheapest)",  mc.prob_rent_cheapest),
+            ]
+            if prob is not None
+        ]
+        for label, prob in probs:
+            lines.append(f"  {label}: {prob:.1%}")
+        if mc.affordability_mc is not None:
+            a = mc.affordability_mc
+            lines.append(f"  Affordability MC (threshold {a.threshold:.0%}):")
+            for name, prob in [
+                ("condo", a.prob_condo_exceeds),
+                ("house", a.prob_house_exceeds),
+                ("rent",  a.prob_rent_exceeds),
+            ]:
+                if prob is not None:
+                    lines.append(f"    P({name} exceeds threshold): {prob:.1%}")
+
     return "\n".join(lines)
 
 
 def plot_diff_distribution(
-    mc: MonteCarloResult,
-    title: str = "Ownership Cost Difference: House vs Condo",
+    diff_pvs: npt.NDArray[np.float64],
+    title: str = "Diff Distribution (House − Condo PV)",
     bins: int = 50,
-    figsize: tuple[float, float] = (10, 6),
-) -> matplotlib.figure.Figure:
+    figsize: tuple = (10, 6),
+) -> Figure:
     """
-    Plot a histogram of the cost difference distribution (House PV - Condo PV).
-    
+    Plot a histogram of a cost-difference distribution.
+
     Args:
-        mc: Monte Carlo results
+        diff_pvs: Pre-computed array of PV differences (e.g. house_pv - condo_pv)
         title: Plot title
         bins: Number of histogram bins
         figsize: Figure size (width, height) in inches
-    
+
     Returns:
         matplotlib Figure object
     """
     fig, ax = plt.subplots(figsize=figsize)
-    
+
+    # Summary stats
+    mean_val = float(np.mean(diff_pvs))
+    p5_val   = float(np.percentile(diff_pvs, 5))
+    p95_val  = float(np.percentile(diff_pvs, 95))
+    prob_positive = float(np.mean(diff_pvs > 0))
+
     # Plot histogram
-    ax.hist(mc.diff_pv, bins=bins, edgecolor='black', alpha=0.7, color='steelblue')
-    
+    ax.hist(diff_pvs, bins=bins, edgecolor='black', alpha=0.7, color='steelblue')
+
     # Add vertical line at zero (break-even)
     ax.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Break-even (costs equal)')
-    
+
     # Add vertical line at mean
-    ax.axvline(x=mc.diff_summary.mean, color='green', linestyle='-', linewidth=2, 
-               label=f'Mean: ${mc.diff_summary.mean:,.0f}')
-    
+    ax.axvline(x=mean_val, color='green', linestyle='-', linewidth=2,
+               label=f'Mean: ${mean_val:,.0f}')
+
     # Add vertical lines for percentiles
-    ax.axvline(x=mc.diff_summary.p5, color='orange', linestyle=':', linewidth=1.5,
-               label=f'5th %: ${mc.diff_summary.p5:,.0f}')
-    ax.axvline(x=mc.diff_summary.p95, color='orange', linestyle=':', linewidth=1.5,
-               label=f'95th %: ${mc.diff_summary.p95:,.0f}')
-    
-    ax.set_xlabel('Cost Difference (House Cost PV - Condo Cost PV) [$]')
+    ax.axvline(x=p5_val, color='orange', linestyle=':', linewidth=1.5,
+               label=f'5th %: ${p5_val:,.0f}')
+    ax.axvline(x=p95_val, color='orange', linestyle=':', linewidth=1.5,
+               label=f'95th %: ${p95_val:,.0f}')
+
+    ax.set_xlabel('Cost Difference [$]')
     ax.set_ylabel('Frequency')
     ax.set_title(title)
     ax.legend(loc='upper right')
-    
+
     # Format x-axis with dollar amounts
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'${x:,.0f}'))
-    
+
     # Add annotation for probability
-    prob_text = f'P(House costs more) = {mc.prob_house_more_expensive:.1%}'
+    prob_text = f'P(positive) = {prob_positive:.1%}'
     ax.annotate(prob_text, xy=(0.02, 0.98), xycoords='axes fraction',
                 fontsize=11, verticalalignment='top',
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=1.0))
-    
+
     # Add explanatory note
-    note_text = 'Positive = House more expensive\nNegative = Condo more expensive'
+    note_text = 'Positive = first option more expensive\nNegative = second option more expensive'
     ax.annotate(note_text, xy=(0.02, 0.88), xycoords='axes fraction',
                 fontsize=9, verticalalignment='top', color='gray')
-    
+
     plt.tight_layout()
     return fig
 
 
 def plot_pv_distributions(
-    mc: MonteCarloResult,
-    title: str = "Ownership Cost PV Distributions",
+    option_arrays: Dict[str, npt.NDArray[np.float64]],
+    title: str = "PV Distributions by Option",
     bins: int = 50,
-    figsize: tuple[float, float] = (12, 5),
-) -> matplotlib.figure.Figure:
+    figsize: tuple = (10, 6),
+) -> Figure:
     """
-    Plot side-by-side histograms of condo and house cost PV distributions.
-    
+    Plot overlapping histograms of PV distributions for multiple housing options.
+
     Args:
-        mc: Monte Carlo results
+        option_arrays: Dict mapping option name (e.g. "Condo", "House", "Rent") to
+                       its array of simulated PV values.
         title: Plot title
         bins: Number of histogram bins
         figsize: Figure size (width, height) in inches
-    
+
     Returns:
         matplotlib Figure object
     """
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-    
-    # Condo distribution
-    axes[0].hist(mc.condo_pv, bins=bins, edgecolor='black', alpha=0.7, color='royalblue')
-    axes[0].axvline(x=mc.condo_summary.mean, color='red', linestyle='-', linewidth=2,
-                    label=f'Mean: ${mc.condo_summary.mean:,.0f}')
-    axes[0].set_xlabel('Condo Ownership Cost PV [$]')
-    axes[0].set_ylabel('Frequency')
-    axes[0].set_title('Condo Ownership Costs (PV)')
-    axes[0].legend()
-    axes[0].xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'${x/1000:.0f}k'))
-    
-    # House distribution
-    axes[1].hist(mc.house_pv, bins=bins, edgecolor='black', alpha=0.7, color='forestgreen')
-    axes[1].axvline(x=mc.house_summary.mean, color='red', linestyle='-', linewidth=2,
-                    label=f'Mean: ${mc.house_summary.mean:,.0f}')
-    axes[1].set_xlabel('House Ownership Cost PV [$]')
-    axes[1].set_ylabel('Frequency')
-    axes[1].set_title('House Ownership Costs (PV)')
-    axes[1].legend()
-    axes[1].xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'${x/1000:.0f}k'))
-    
-    fig.suptitle(title + '\n(Higher PV = More Expensive)', fontsize=14)
+    colors = ['royalblue', 'forestgreen', 'darkorange', 'purple', 'crimson']
+    fig, ax = plt.subplots(figsize=figsize)
+
+    for (name, arr), color in zip(option_arrays.items(), colors):
+        mean_val = float(np.mean(arr))
+        ax.hist(arr, bins=bins, edgecolor='black', alpha=0.5, color=color,
+                label=f'{name} (mean ${mean_val/1000:.0f}k)')
+        ax.axvline(x=mean_val, color=color, linestyle='-', linewidth=2)
+
+    ax.set_xlabel('Ownership Cost PV [$]')
+    ax.set_ylabel('Frequency')
+    ax.set_title(title + '\n(Higher PV = More Expensive)')
+    ax.legend()
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'${x/1000:.0f}k'))
+
     plt.tight_layout()
     return fig
 
@@ -238,28 +235,28 @@ def plot_sensitivity(
 ) -> matplotlib.figure.Figure:
     """
     Plot sensitivity of P(House costs more) to a parameter.
-    
+
     Args:
         param_values: List of parameter values tested
         probabilities: List of corresponding probabilities
         param_name: Name of the parameter (for x-axis label)
         title: Plot title
         figsize: Figure size
-    
+
     Returns:
         matplotlib Figure object
     """
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     ax.plot(param_values, probabilities, marker='o', linewidth=2, markersize=8, color='navy')
-    
+
     ax.set_xlabel(param_name)
     ax.set_ylabel('P(House ownership costs more)')
     ax.set_title(title)
-    
+
     # Format y-axis as percentage
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.0%}'))
-    
+
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     return fig
