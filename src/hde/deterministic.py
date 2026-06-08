@@ -13,7 +13,6 @@ from .models import (
     HouseParams,
     SimulationParams,
     EconomicParams,
-    DeterministicResult,
     EventConfig,
     RecurringOtherCost,
     ComparisonSpec,
